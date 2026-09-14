@@ -1,0 +1,174 @@
+erDiagram
+    USER ||--o| USERPROFILE : "has"
+    USER ||--o{ USERROLE : "assigned"
+    ROLE ||--o{ USERROLE : "grants"
+    USER ||--o{ TICKET : "owns/sells"
+    TICKETCATEGORY ||--o{ TICKET : "classifies"
+    EVENT ||--o{ TICKET : "linked to (if event)"
+    TRAVEL ||--o{ TICKET : "linked to (if travel)"
+    TICKET ||--o{ TICKETLISTING : "listed as"
+    TICKET ||--o{ TICKETVERIFICATION : "verified via"
+    USER ||--o{ TICKETVERIFICATION : "requests"
+    TICKETLISTING ||--o{ ORDER : "purchased in"
+    USER ||--o{ ORDER : "buys"
+    ORDER ||--|| PAYMENT : "paid by"
+    ORDER ||--o{ TRANSACTION : "generates"
+    PAYMENT ||--o{ TRANSACTION : "settles"
+    ORDER ||--o{ REVIEW : "reviewed via"
+    USER ||--o{ REVIEW : "writes (reviewer)"
+    USER ||--o{ REVIEW : "receives (reviewee)"
+    USER ||--o{ REPORT : "files"
+    USER ||--o{ REPORT : "is reported in"
+    TICKETLISTING ||--o{ REPORT : "is reported in"
+    ORDER ||--o{ DISPUTE : "disputed as"
+    USER ||--o{ DISPUTE : "raises"
+    USER ||--o{ NOTIFICATION : "receives"
+    USER ||--o{ ADMINACTION : "performs (admin)"
+    USER ||--o{ FRAUDALERT : "flagged in"
+    TICKET ||--o{ FRAUDALERT : "flagged in"
+    ORDER ||--o{ FRAUDALERT : "flagged in"
+    USER ||--o{ FRAUDALERT : "resolves (admin)"
+
+    USER {
+        bigint user_id PK
+        varchar username
+        varchar email
+        varchar password_hash
+        varchar phone
+        varchar account_status
+        timestamp created_at
+    }
+    ROLE {
+        int role_id PK
+        varchar role_name
+        varchar description
+    }
+    USERROLE {
+        bigint user_id PK,FK
+        int role_id PK,FK
+        timestamp assigned_at
+    }
+    USERPROFILE {
+        bigint profile_id PK
+        bigint user_id FK
+        varchar full_name
+        date dob
+        varchar address
+        varchar nid_passport_no
+        boolean identity_verified
+    }
+    TICKETCATEGORY {
+        int category_id PK
+        varchar category_name
+        varchar ticket_type
+    }
+    EVENT {
+        bigint event_id PK
+        varchar event_name
+        varchar venue
+        datetime event_datetime
+    }
+    TRAVEL {
+        bigint travel_id PK
+        varchar travel_mode
+        varchar origin
+        varchar destination
+        datetime departure_datetime
+    }
+    TICKET {
+        bigint ticket_id PK
+        bigint seller_id FK
+        int category_id FK
+        bigint event_id FK
+        bigint travel_id FK
+        varchar seat_number
+        varchar ticket_code
+        decimal original_price
+        varchar ticket_status
+    }
+    TICKETLISTING {
+        bigint listing_id PK
+        bigint ticket_id FK
+        decimal asking_price
+        varchar listing_status
+        timestamp listed_at
+    }
+    TICKETVERIFICATION {
+        bigint verification_id PK
+        bigint ticket_id FK
+        bigint requested_by FK
+        varchar verification_method
+        decimal ai_confidence_score
+        varchar decision
+        varchar verification_status
+    }
+    ORDER {
+        bigint order_id PK
+        bigint listing_id FK
+        bigint buyer_id FK
+        varchar order_status
+        decimal order_total
+    }
+    PAYMENT {
+        bigint payment_id PK
+        bigint order_id FK
+        varchar payment_method
+        varchar gateway_reference
+        decimal amount
+        varchar payment_status
+    }
+    TRANSACTION {
+        bigint transaction_id PK
+        bigint order_id FK
+        bigint payment_id FK
+        varchar transaction_type
+        decimal amount
+        varchar transaction_status
+    }
+    REVIEW {
+        bigint review_id PK
+        bigint order_id FK
+        bigint reviewer_id FK
+        bigint reviewee_id FK
+        tinyint rating
+        text comment
+    }
+    REPORT {
+        bigint report_id PK
+        bigint reporter_id FK
+        bigint reported_user_id FK
+        bigint reported_listing_id FK
+        varchar reason
+        varchar report_status
+    }
+    DISPUTE {
+        bigint dispute_id PK
+        bigint order_id FK
+        bigint raised_by FK
+        varchar dispute_status
+        text resolution_notes
+    }
+    NOTIFICATION {
+        bigint notification_id PK
+        bigint user_id FK
+        varchar type
+        varchar message
+        boolean is_read
+    }
+    ADMINACTION {
+        bigint action_id PK
+        bigint admin_id FK
+        varchar action_type
+        varchar target_type
+        bigint target_id
+    }
+    FRAUDALERT {
+        bigint alert_id PK
+        bigint related_user_id FK
+        bigint related_ticket_id FK
+        bigint related_order_id FK
+        varchar alert_type
+        varchar severity
+        varchar alert_status
+        bigint resolved_by FK
+    }
