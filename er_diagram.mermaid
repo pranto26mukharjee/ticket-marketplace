@@ -28,147 +28,176 @@ erDiagram
     TICKET ||--o{ FRAUDALERT : "flagged in"
     ORDER ||--o{ FRAUDALERT : "flagged in"
     USER ||--o{ FRAUDALERT : "resolves (admin)"
+    USER ||--o{ FAVORITE : "saves"
+    TICKET ||--o{ FAVORITE : "saved in"
 
     USER {
-        bigint user_id PK
-        varchar username
-        varchar email
-        varchar password_hash
-        varchar phone
-        varchar account_status
-        timestamp created_at
+        string id PK
+        string username
+        string fullName
+        string email
+        string passwordHash
+        string phone
+        string accountStatus
+        string role
+        datetime createdAt
+        datetime updatedAt
     }
     ROLE {
-        int role_id PK
-        varchar role_name
-        varchar description
+        string id PK
+        string roleName
+        string description
     }
     USERROLE {
-        bigint user_id PK,FK
-        int role_id PK,FK
-        timestamp assigned_at
+        string userId PK,FK
+        string roleId PK,FK
+        datetime assignedAt
     }
     USERPROFILE {
-        bigint profile_id PK
-        bigint user_id FK
-        varchar full_name
-        date dob
-        varchar address
-        varchar nid_passport_no
-        boolean identity_verified
+        string id PK
+        string userId FK
+        string fullName
+        datetime dob
+        string address
+        string nidPassportNo
+        boolean identityVerified
     }
     TICKETCATEGORY {
-        int category_id PK
-        varchar category_name
-        varchar ticket_type
+        string id PK
+        string categoryName
+        string ticketType
     }
     EVENT {
-        bigint event_id PK
-        varchar event_name
-        varchar venue
-        datetime event_datetime
+        string id PK
+        string eventName
+        string venue
+        datetime eventDatetime
     }
     TRAVEL {
-        bigint travel_id PK
-        varchar travel_mode
-        varchar origin
-        varchar destination
-        datetime departure_datetime
+        string id PK
+        string travelMode
+        string origin
+        string destination
+        datetime departureDatetime
     }
     TICKET {
-        bigint ticket_id PK
-        bigint seller_id FK
-        int category_id FK
-        bigint event_id FK
-        bigint travel_id FK
-        varchar seat_number
-        varchar ticket_code
-        decimal original_price
-        varchar ticket_status
+        string id PK
+        string sellerId FK
+        string categoryId FK
+        string eventId FK
+        string travelId FK
+        string title
+        string description
+        string from
+        string to
+        datetime travelDate
+        string travelTime
+        string seatNumber
+        string ticketType
+        float price
+        int quantity
+        string ticketCode
+        float originalPrice
+        string ticketStatus
+        datetime createdAt
+        datetime updatedAt
     }
     TICKETLISTING {
-        bigint listing_id PK
-        bigint ticket_id FK
-        decimal asking_price
-        varchar listing_status
-        timestamp listed_at
+        string id PK
+        string ticketId FK
+        float askingPrice
+        string listingStatus
+        datetime listedAt
     }
     TICKETVERIFICATION {
-        bigint verification_id PK
-        bigint ticket_id FK
-        bigint requested_by FK
-        varchar verification_method
-        decimal ai_confidence_score
-        varchar decision
-        varchar verification_status
+        string id PK
+        string ticketId FK
+        string requestedById FK
+        string verificationMethod
+        float aiConfidenceScore
+        string decision
+        string verificationStatus
+        string documentUrl
+        string extractedData
     }
     ORDER {
-        bigint order_id PK
-        bigint listing_id FK
-        bigint buyer_id FK
-        varchar order_status
-        decimal order_total
+        string id PK
+        string listingId FK
+        string ticketId FK
+        string buyerId FK
+        string orderStatus
+        float orderTotal
+        int quantity
+        string paymentMethod
+        datetime createdAt
+        datetime updatedAt
     }
     PAYMENT {
-        bigint payment_id PK
-        bigint order_id FK
-        varchar payment_method
-        varchar gateway_reference
-        decimal amount
-        varchar payment_status
+        string id PK
+        string orderId FK
+        string paymentMethod
+        string gatewayReference
+        float amount
+        string paymentStatus
     }
     TRANSACTION {
-        bigint transaction_id PK
-        bigint order_id FK
-        bigint payment_id FK
-        varchar transaction_type
-        decimal amount
-        varchar transaction_status
+        string id PK
+        string orderId FK
+        string paymentId FK
+        string transactionType
+        float amount
+        string transactionStatus
     }
     REVIEW {
-        bigint review_id PK
-        bigint order_id FK
-        bigint reviewer_id FK
-        bigint reviewee_id FK
-        tinyint rating
-        text comment
+        string id PK
+        string orderId FK
+        string reviewerId FK
+        string revieweeId FK
+        int rating
+        string comment
     }
     REPORT {
-        bigint report_id PK
-        bigint reporter_id FK
-        bigint reported_user_id FK
-        bigint reported_listing_id FK
-        varchar reason
-        varchar report_status
+        string id PK
+        string reporterId FK
+        string reportedUserId FK
+        string reportedListingId FK
+        string reason
+        string reportStatus
     }
     DISPUTE {
-        bigint dispute_id PK
-        bigint order_id FK
-        bigint raised_by FK
-        varchar dispute_status
-        text resolution_notes
+        string id PK
+        string orderId FK
+        string raisedById FK
+        string disputeStatus
+        string resolutionNotes
     }
     NOTIFICATION {
-        bigint notification_id PK
-        bigint user_id FK
-        varchar type
-        varchar message
-        boolean is_read
+        string id PK
+        string userId FK
+        string type
+        string message
+        boolean isRead
     }
     ADMINACTION {
-        bigint action_id PK
-        bigint admin_id FK
-        varchar action_type
-        varchar target_type
-        bigint target_id
+        string id PK
+        string adminId FK
+        string actionType
+        string targetType
+        string targetId
     }
     FRAUDALERT {
-        bigint alert_id PK
-        bigint related_user_id FK
-        bigint related_ticket_id FK
-        bigint related_order_id FK
-        varchar alert_type
-        varchar severity
-        varchar alert_status
-        bigint resolved_by FK
+        string id PK
+        string relatedUserId FK
+        string relatedTicketId FK
+        string relatedOrderId FK
+        string alertType
+        string severity
+        string alertStatus
+        string resolvedById FK
+    }
+    FAVORITE {
+        string id PK
+        string userId FK
+        string ticketId FK
+        datetime createdAt
     }

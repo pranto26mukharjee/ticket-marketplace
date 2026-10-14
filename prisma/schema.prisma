@@ -1,0 +1,296 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id             String    @id @default(cuid())
+  username       String?   @unique
+  fullName       String?   // Kept for backward compatibility
+  email          String    @unique
+  passwordHash   String
+  phone          String?   @unique
+  accountStatus  String    @default("ACTIVE")
+  role           String    @default("BUYER") // Kept for backward compatibility
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  profile        UserProfile?
+  userRoles      UserRole[]
+  tickets        Ticket[]             @relation("UserTickets")
+  verifications  TicketVerification[] @relation("RequestedVerifications")
+  orders         Order[]              @relation("UserOrders")
+  reviewsWritten Review[]             @relation("Reviewer")
+  reviewsReceived Review[]            @relation("Reviewee")
+  reportsFiled   Report[]             @relation("Reporter")
+  reportsAgainst Report[]             @relation("ReportedUser")
+  disputes       Dispute[]            @relation("RaisedDisputes")
+  notifications  Notification[]
+  adminActions   AdminAction[]        @relation("AdminActions")
+  fraudAlerts    FraudAlert[]         @relation("FraudRelatedUser")
+  resolvedAlerts FraudAlert[]         @relation("ResolvedAlerts")
+  favorites      Favorite[]
+}
+
+model Role {
+  id          String     @id @default(cuid())
+  roleName    String     @unique
+  description String?
+  userRoles   UserRole[]
+}
+
+model UserRole {
+  userId     String
+  roleId     String
+  assignedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@id([userId, roleId])
+}
+
+model UserProfile {
+  id               String    @id @default(cuid())
+  userId           String    @unique
+  fullName         String
+  dob              DateTime?
+  address          String?
+  nidPassportNo    String?
+  identityVerified Boolean   @default(false)
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model TicketCategory {
+  id           String   @id @default(cuid())
+  categoryName String   @unique
+  ticketType   String?
+  tickets      Ticket[]
+}
+
+model Event {
+  id            String   @id @default(cuid())
+  eventName     String
+  venue         String
+  eventDatetime DateTime
+  tickets       Ticket[]
+}
+
+model Travel {
+  id                String   @id @default(cuid())
+  travelMode        String
+  origin            String
+  destination       String
+  departureDatetime DateTime
+  tickets           Ticket[]
+}
+
+model Ticket {
+  id            String  @id @default(cuid())
+  sellerId      String
+  categoryId    String?
+  eventId       String?
+  travelId      String?
+  
+  // Legacy fields for backward compatibility
+  title         String?
+  description   String?
+  from          String?
+  to            String?
+  travelDate    DateTime?
+  travelTime    String?
+  ticketType    String?
+  price         Float?
+  quantity      Int            @default(1)
+
+  seatNumber    String?
+  ticketCode    String?
+  originalPrice Float?
+  ticketStatus  String  @default("AVAILABLE") // AVAILABLE, SOLD, CANCELLED
+
+  seller   User            @relation("UserTickets", fields: [sellerId], references: [id])
+  category TicketCategory? @relation(fields: [categoryId], references: [id])
+  event    Event?          @relation(fields: [eventId], references: [id])
+  travel   Travel?         @relation(fields: [travelId], references: [id])
+
+  listings      TicketListing[]
+  verifications TicketVerification[]
+  fraudAlerts   FraudAlert[]
+  orders        Order[] // Legacy compatibility
+  favorites     Favorite[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model TicketListing {
+  id            String   @id @default(cuid())
+  ticketId      String
+  askingPrice   Float
+  listingStatus String   @default("ACTIVE")
+  listedAt      DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id])
+
+  orders        Order[]
+  reports       Report[]
+}
+
+model TicketVerification {
+  id                 String  @id @default(cuid())
+  ticketId           String
+  requestedById      String
+  verificationMethod String
+  aiConfidenceScore  Float?
+  decision           String?
+  verificationStatus String  @default("PENDING")
+  documentUrl        String?
+  extractedData      String?
+
+  ticket      Ticket @relation(fields: [ticketId], references: [id])
+  requestedBy User   @relation("RequestedVerifications", fields: [requestedById], references: [id])
+}
+
+model Order {
+  id          String @id @default(cuid())
+  listingId   String?
+  ticketId    String? // Legacy compatibility
+  buyerId     String
+  orderStatus String @default("PENDING") // PENDING, CONFIRMED, CANCELLED
+  orderTotal  Float
+  
+  // Legacy fields
+  quantity      Int?
+  paymentMethod String?
+
+  listing TicketListing? @relation(fields: [listingId], references: [id])
+  ticket  Ticket?        @relation(fields: [ticketId], references: [id])
+  buyer   User           @relation("UserOrders", fields: [buyerId], references: [id])
+
+  payment      Payment?
+  transactions Transaction[]
+  reviews      Review[]
+  disputes     Dispute[]
+  fraudAlerts  FraudAlert[]
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Payment {
+  id               String @id @default(cuid())
+  orderId          String @unique
+  paymentMethod    String
+  gatewayReference String?
+  amount           Float
+  paymentStatus    String @default("PENDING")
+
+  order        Order         @relation(fields: [orderId], references: [id])
+  transactions Transaction[]
+}
+
+model Transaction {
+  id                String @id @default(cuid())
+  orderId           String
+  paymentId         String
+  transactionType   String
+  amount            Float
+  transactionStatus String
+
+  order   Order   @relation(fields: [orderId], references: [id])
+  payment Payment @relation(fields: [paymentId], references: [id])
+}
+
+model Review {
+  id         String @id @default(cuid())
+  orderId    String
+  reviewerId String
+  revieweeId String
+  rating     Int
+  comment    String?
+
+  order    Order @relation(fields: [orderId], references: [id])
+  reviewer User  @relation("Reviewer", fields: [reviewerId], references: [id])
+  reviewee User  @relation("Reviewee", fields: [revieweeId], references: [id])
+}
+
+model Report {
+  id                String  @id @default(cuid())
+  reporterId        String
+  reportedUserId    String?
+  reportedListingId String?
+  reason            String
+  reportStatus      String  @default("PENDING")
+
+  reporter        User           @relation("Reporter", fields: [reporterId], references: [id])
+  reportedUser    User?          @relation("ReportedUser", fields: [reportedUserId], references: [id])
+  reportedListing TicketListing? @relation(fields: [reportedListingId], references: [id])
+}
+
+model Dispute {
+  id              String  @id @default(cuid())
+  orderId         String
+  raisedById      String
+  disputeStatus   String  @default("OPEN")
+  resolutionNotes String?
+
+  order    Order @relation(fields: [orderId], references: [id])
+  raisedBy User  @relation("RaisedDisputes", fields: [raisedById], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model AdminAction {
+  id         String   @id @default(cuid())
+  adminId    String
+  actionType String
+  targetType String
+  targetId   String
+  details    String?
+  createdAt  DateTime @default(now())
+
+  admin User @relation("AdminActions", fields: [adminId], references: [id])
+}
+
+model FraudAlert {
+  id              String   @id @default(cuid())
+  relatedUserId   String?
+  relatedTicketId String?
+  relatedOrderId  String?
+  alertType       String
+  severity        String
+  alertStatus     String   @default("OPEN")
+  resolvedById    String?
+  details         String?
+  createdAt       DateTime @default(now())
+
+  relatedUser   User?   @relation("FraudRelatedUser", fields: [relatedUserId], references: [id])
+  relatedTicket Ticket? @relation(fields: [relatedTicketId], references: [id])
+  relatedOrder  Order?  @relation(fields: [relatedOrderId], references: [id])
+  resolvedBy    User?   @relation("ResolvedAlerts", fields: [resolvedById], references: [id])
+}
+
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  ticketId  String
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, ticketId])
+}
