@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#1A1C43" />
+    <title>You're offline | TicketLagbe</title>
+    <style>
+      body {
+        align-items: center;
+        background: #f8fafc;
+        color: #1a1c43;
+        display: flex;
+        font-family: system-ui, sans-serif;
+        justify-content: center;
+        margin: 0;
+        min-height: 100vh;
+        text-align: center;
+      }
+      main {
+        max-width: 24rem;
+        padding: 2rem;
+      }
+      button {
+        background: #1a1c43;
+        border: 0;
+        border-radius: 0.5rem;
+        color: white;
+        cursor: pointer;
+        font: inherit;
+        margin-top: 1rem;
+        padding: 0.75rem 1.25rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>You're offline</h1>
+      <p>Connect to the internet to use TicketLagbe, then try again.</p>
+      <button onclick="window.location.reload()">Try again</button>
+    </main>
+  </body>
+</html>

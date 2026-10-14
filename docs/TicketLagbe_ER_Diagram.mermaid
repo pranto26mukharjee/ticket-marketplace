@@ -1,0 +1,208 @@
+erDiagram
+    USER ||--o| USERPROFILE : "has"
+    USER ||--o{ USERROLE : "assigned"
+    ROLE ||--o{ USERROLE : "grants"
+    USER ||--o{ TICKET : "owns/sells"
+    TICKETCATEGORY ||--o{ TICKET : "classifies"
+    EVENT ||--o{ TICKET : "linked to (if event)"
+    TRAVEL ||--o{ TICKET : "linked to (if travel)"
+    TICKET ||--o{ TICKETLISTING : "listed as"
+    TICKET ||--o{ TICKETVERIFICATION : "verified via"
+    USER ||--o{ TICKETVERIFICATION : "requests"
+    TICKETLISTING ||--o{ ORDER : "purchased in"
+    USER ||--o{ ORDER : "buys"
+    ORDER ||--|| PAYMENT : "paid by"
+    ORDER ||--o{ TRANSACTION : "generates"
+    PAYMENT ||--o{ TRANSACTION : "settles"
+    ORDER ||--o{ REVIEW : "reviewed via"
+    USER ||--o{ REVIEW : "writes (reviewer)"
+    USER ||--o{ REVIEW : "receives (reviewee)"
+    USER ||--o{ REPORT : "files"
+    USER ||--o{ REPORT : "is reported in"
+    TICKETLISTING ||--o{ REPORT : "is reported in"
+    ORDER ||--o{ DISPUTE : "disputed as"
+    USER ||--o{ DISPUTE : "raises"
+    USER ||--o{ NOTIFICATION : "receives"
+    USER ||--o{ ADMINACTION : "performs (admin)"
+    USER ||--o{ FRAUDALERT : "flagged in"
+    TICKET ||--o{ FRAUDALERT : "flagged in"
+    ORDER ||--o{ FRAUDALERT : "flagged in"
+    USER ||--o{ FRAUDALERT : "resolves (admin)"
+    USER ||--o{ FAVORITE : "saves"
+    TICKET ||--o{ FAVORITE : "saved in"
+
+    USER {
+        string id PK
+        string username
+        string fullName
+        string email
+        string passwordHash
+        string phone
+        string accountStatus
+        string role
+        datetime createdAt
+        datetime updatedAt
+    }
+    ROLE {
+        string id PK
+        string roleName
+        string description
+    }
+    USERROLE {
+        string userId PK,FK
+        string roleId PK,FK
+        datetime assignedAt
+    }
+    USERPROFILE {
+        string id PK
+        string userId FK
+        string fullName
+        datetime dob
+        string address
+        string nidPassportNo
+        boolean identityVerified
+    }
+    TICKETCATEGORY {
+        string id PK
+        string categoryName
+        string ticketType
+    }
+    EVENT {
+        string id PK
+        string eventName
+        string venue
+        datetime eventDatetime
+    }
+    TRAVEL {
+        string id PK
+        string travelMode
+        string origin
+        string destination
+        datetime departureDatetime
+    }
+    TICKET {
+        string id PK
+        string sellerId FK
+        string categoryId FK
+        string eventId FK
+        string travelId FK
+        string title
+        string description
+        string from
+        string to
+        datetime travelDate
+        string travelTime
+        string seatNumber
+        string ticketType
+        float price
+        int quantity
+        string ticketCode
+        float originalPrice
+        string ticketStatus
+        datetime createdAt
+        datetime updatedAt
+    }
+    TICKETLISTING {
+        string id PK
+        string ticketId FK
+        float askingPrice
+        string listingStatus
+        datetime listedAt
+    }
+    TICKETVERIFICATION {
+        string id PK
+        string ticketId FK
+        string requestedById FK
+        string verificationMethod
+        float aiConfidenceScore
+        string decision
+        string verificationStatus
+        string documentUrl
+        string extractedData
+    }
+    ORDER {
+        string id PK
+        string listingId FK
+        string ticketId FK
+        string buyerId FK
+        string orderStatus
+        float orderTotal
+        int quantity
+        string paymentMethod
+        datetime createdAt
+        datetime updatedAt
+    }
+    PAYMENT {
+        string id PK
+        string orderId FK
+        string paymentMethod
+        string gatewayReference
+        float amount
+        string paymentStatus
+    }
+    TRANSACTION {
+        string id PK
+        string orderId FK
+        string paymentId FK
+        string transactionType
+        float amount
+        string transactionStatus
+    }
+    REVIEW {
+        string id PK
+        string orderId FK
+        string reviewerId FK
+        string revieweeId FK
+        int rating
+        string comment
+    }
+    REPORT {
+        string id PK
+        string reporterId FK
+        string reportedUserId FK
+        string reportedListingId FK
+        string reason
+        string reportStatus
+    }
+    DISPUTE {
+        string id PK
+        string orderId FK
+        string raisedById FK
+        string disputeStatus
+        string resolutionNotes
+    }
+    NOTIFICATION {
+        string id PK
+        string userId FK
+        string type
+        string message
+        boolean isRead
+        datetime createdAt
+    }
+    ADMINACTION {
+        string id PK
+        string adminId FK
+        string actionType
+        string targetType
+        string targetId
+        string details
+        datetime createdAt
+    }
+    FRAUDALERT {
+        string id PK
+        string relatedUserId FK
+        string relatedTicketId FK
+        string relatedOrderId FK
+        string alertType
+        string severity
+        string alertStatus
+        string resolvedById FK
+        string details
+        datetime createdAt
+    }
+    FAVORITE {
+        string id PK
+        string userId FK
+        string ticketId FK
+        datetime createdAt
+    }
