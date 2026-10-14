@@ -2,12 +2,9 @@
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { UserPlus, Loader2, Eye, EyeOff, CheckCircle2 } from "lucide-react";
 
 export default function SignupPage() {
-  const router = useRouter();
-
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -68,7 +65,7 @@ export default function SignupPage() {
 
       setSuccess(true);
       setTimeout(() => {
-        router.push("/login");
+        window.location.replace("/dashboard");
       }, 2000);
     } catch (error) {
       console.error("Registration error:", error);
@@ -99,7 +96,7 @@ export default function SignupPage() {
           {success && (
             <div className="mb-5 rounded-xl bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-700 flex items-center gap-2">
               <CheckCircle2 size={18} />
-              Account created! Redirecting to login...
+              Account created! Opening your dashboard...
             </div>
           )}
 

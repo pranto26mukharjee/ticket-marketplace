@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ShoppingBag,
@@ -148,7 +148,7 @@ export default function DashboardPage() {
   // LOAD SELLER DASHBOARD
   // ==================================================
 
-  async function loadDashboard(showLoader = true) {
+  const loadDashboard = useCallback(async (showLoader = true) => {
     try {
       if (showLoader) {
         setLoading(true);
@@ -165,7 +165,7 @@ export default function DashboardPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        if (response.status === 401 || response.status === 404) {
+        if (response.status === 401) {
           router.replace("/login?redirect=/dashboard");
           return;
         }
@@ -190,13 +190,13 @@ export default function DashboardPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }
+  }, [router]);
 
   // ==================================================
   // LOAD BUYER PURCHASES
   // ==================================================
 
-  async function loadPurchases(showLoader = true) {
+  const loadPurchases = useCallback(async (showLoader = true) => {
     try {
       if (showLoader) {
         setPurchasesLoading(true);
@@ -211,7 +211,7 @@ export default function DashboardPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        if (response.status === 401 || response.status === 404) {
+        if (response.status === 401) {
           router.replace("/login?redirect=/dashboard");
           return;
         }
@@ -243,7 +243,7 @@ export default function DashboardPage() {
     } finally {
       setPurchasesLoading(false);
     }
-  }
+  }, [router]);
 
   // ==================================================
   // INITIAL LOAD & STRICT AUTH GUARD
@@ -255,8 +255,14 @@ export default function DashboardPage() {
     async function verifyAndLoad() {
       try {
         const res = await fetch("/api/auth/me", { cache: "no-store" });
-        if (!res.ok) {
+        if (res.status === 401) {
           router.replace("/login?redirect=/dashboard");
+          return;
+        }
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          setError(data?.message || "Could not verify your session. Please try again.");
+          setLoading(false);
           return;
         }
         const data = await res.json();
@@ -272,8 +278,10 @@ export default function DashboardPage() {
           loadDashboard(false);
           loadPurchases(false);
         }, 20000);
-      } catch {
-        router.replace("/login?redirect=/dashboard");
+      } catch (error) {
+        console.error("Dashboard authentication check failed:", error);
+        setError("Could not verify your session. Check your internet connection and try again.");
+        setLoading(false);
       }
     }
 
@@ -282,7 +290,7 @@ export default function DashboardPage() {
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, []);
+  }, [loadDashboard, loadPurchases, router]);
 
   // ==================================================
   // LOGOUT
@@ -363,7 +371,22 @@ export default function DashboardPage() {
   }
 
   if (!user) {
-    return null;
+    return (
+      <main className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-4">
+        <div className="max-w-md text-center space-y-4">
+          <p className="text-sm text-red-700">
+            {error || "Your dashboard could not be loaded."}
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="px-5 py-2.5 rounded-xl bg-[#0D9488] text-white font-semibold text-sm"
+          >
+            Retry
+          </button>
+        </div>
+      </main>
+    );
   }
 
   return (

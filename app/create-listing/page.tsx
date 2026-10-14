@@ -24,21 +24,35 @@ import {
 
 export default function CreateListingPage() {
   const router = useRouter();
+  const [authChecking, setAuthChecking] = useState(true);
+  const [authError, setAuthError] = useState("");
 
   // Enforce authentication on mount
   useEffect(() => {
     async function checkAuth() {
       try {
         const res = await fetch("/api/auth/me", { cache: "no-store" });
-        if (!res.ok) {
-          router.replace("/login?redirect=/create-listing");
+        if (res.status === 401) {
+          window.location.replace("/login?redirect=/create-listing");
+          return;
         }
-      } catch {
-        router.replace("/login?redirect=/create-listing");
+        if (!res.ok) {
+          throw new Error("Could not verify your session. Please try again.");
+        }
+        const data = await res.json();
+        if (!data.success || !data.user) {
+          window.location.replace("/login?redirect=/create-listing");
+          return;
+        }
+        setAuthChecking(false);
+      } catch (error) {
+        console.error("Listing authentication check failed:", error);
+        setAuthError("Could not verify your session. Check your internet connection and try again.");
+        setAuthChecking(false);
       }
     }
     checkAuth();
-  }, [router]);
+  }, []);
 
   // Form states
   const [title, setTitle] = useState("");
@@ -155,7 +169,7 @@ export default function CreateListingPage() {
 
       if (!response.ok) {
         if (response.status === 401) {
-          router.push("/login?redirect=/create-listing");
+          window.location.replace("/login?redirect=/create-listing");
           return;
         }
         throw new Error(data.message || "Failed to create ticket listing.");
@@ -170,6 +184,32 @@ export default function CreateListingPage() {
       setAiAnalyzing(false);
       setSubmitting(false);
     }
+  }
+
+  if (authChecking || authError) {
+    return (
+      <main className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-4">
+        <div className="max-w-md text-center space-y-4">
+          {authChecking ? (
+            <>
+              <Loader2 className="w-8 h-8 animate-spin text-[#0D9488] mx-auto" />
+              <p className="text-sm text-slate-600">Checking your account...</p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-red-700">{authError}</p>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="px-5 py-2.5 rounded-xl bg-[#0D9488] text-white font-semibold text-sm"
+              >
+                Retry
+              </button>
+            </>
+          )}
+        </div>
+      </main>
+    );
   }
 
   return (
