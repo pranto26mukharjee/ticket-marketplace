@@ -6,14 +6,13 @@ const secret = new TextEncoder().encode(
   process.env.JWT_SECRET || "ticketlagbe-super-secret-key-2026"
 );
 
-// Pages that can be visited without logging in
+// Strictly public pages allowed without logging in
 const publicExactRoutes = [
   "/",
   "/login",
   "/signup",
   "/forgot-password",
   "/reset-password",
-  "/tickets",
   "/admin/login",
 ];
 
@@ -29,16 +28,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Allow public exact routes
+  // Allow strictly public exact routes
   if (publicExactRoutes.includes(pathname)) {
-    return NextResponse.next();
-  }
-
-  // Allow public dynamic ticket viewing (/tickets/[id] and /verification-result)
-  if (
-    pathname.startsWith("/tickets/") ||
-    pathname.startsWith("/verification-result")
-  ) {
     return NextResponse.next();
   }
 
@@ -52,6 +43,8 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(adminLoginUrl);
     }
 
+    // All other pages (including /tickets, /tickets/[id], /create-listing, /messages, /dashboard)
+    // require authenticated login
     const fullPath = pathname + request.nextUrl.search;
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("redirect", fullPath);
@@ -66,7 +59,7 @@ export async function middleware(request: NextRequest) {
     // Role-based protection for /admin routes
     if (pathname.startsWith("/admin") && pathname !== "/admin/login") {
       if (role !== "ADMIN") {
-        // Non-admin user trying to access admin portal
+        // Non-admin user trying to access admin backoffice
         const redirectUrl = new URL("/dashboard", request.url);
         return NextResponse.redirect(redirectUrl);
       }

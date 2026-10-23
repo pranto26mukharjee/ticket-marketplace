@@ -21,11 +21,14 @@ import {
   Clock,
   User,
   Star,
-  Info,
   Sparkles,
-  Copy,
   Check,
   MessageSquare,
+  Bus,
+  Train,
+  Plane,
+  Music,
+  Building,
 } from "lucide-react";
 
 interface TicketDetails {
@@ -44,11 +47,17 @@ interface TicketDetails {
   price: number | null;
   quantity: number;
   ticketStatus: string;
+  operatorName?: string | null;
+  coachType?: string | null;
+  boardingPoint?: string | null;
+  droppingPoint?: string | null;
+  bogeyNumber?: string | null;
   createdAt: string;
   seller?: {
     id: string;
     fullName: string | null;
     email: string;
+    phone?: string | null;
     createdAt: string;
     profile?: {
       identityVerified: boolean;
@@ -88,121 +97,112 @@ export default function TicketDetailsPage() {
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
   const [reportSubmitted, setReportSubmitted] = useState(false);
-
-  // Inquiry messaging states
-  const [inquiryOpen, setInquiryOpen] = useState(false);
-  const [inquiryMessage, setInquiryMessage] = useState("");
-  const [inquiryLoading, setInquiryLoading] = useState(false);
-  const [inquirySent, setInquirySent] = useState(false);
   const [navigatingCheckout, setNavigatingCheckout] = useState(false);
 
   async function handleProceedToCheckout() {
     if (!ticket) return;
     setNavigatingCheckout(true);
-    try {
-      const res = await fetch("/api/auth/me", { cache: "no-store" });
-      if (!res.ok) {
-        const returnUrl = encodeURIComponent(`/checkout?ticketId=${ticket.id}&quantity=${quantity}`);
-        router.push(`/login?redirect=${returnUrl}`);
-        return;
-      }
-      router.push(`/checkout?ticketId=${ticket.id}&quantity=${quantity}`);
-    } catch {
-      const returnUrl = encodeURIComponent(`/checkout?ticketId=${ticket.id}&quantity=${quantity}`);
-      router.push(`/login?redirect=${returnUrl}`);
-    } finally {
-      setNavigatingCheckout(false);
-    }
+    router.push(`/checkout?ticketId=${ticket.id}&quantity=${quantity}`);
   }
 
+  // Load ticket details
   useEffect(() => {
-    if (!ticketId) return;
-
-    let isMounted = true;
-
     async function loadTicket() {
       try {
         setLoading(true);
-        setError("");
+        const res = await fetch(`/api/tickets/${ticketId}`);
+        const data = await res.json();
 
-        const response = await fetch(`/api/tickets/${ticketId}`);
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.message || "Failed to load ticket details.");
+        if (!res.ok || !data.success) {
+          throw new Error(data.message || "Could not find this ticket.");
         }
 
-        if (isMounted) {
-          setTicket(data.ticket);
-        }
+        setTicket(data.ticket);
       } catch (err: unknown) {
-        if (isMounted) {
-          setError(err instanceof Error ? err.message : "Something went wrong.");
-        }
+        setError(err instanceof Error ? err.message : "Error loading ticket.");
       } finally {
-        if (isMounted) setLoading(false);
+        setLoading(false);
       }
     }
 
-    loadTicket();
+    if (ticketId) loadTicket();
+  }, [ticketId]);
 
-    // Check favorite status
+  // Check wishlist state
+  useEffect(() => {
+    if (!ticketId) return;
     fetch("/api/favorites")
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => {
+        if (!res.ok) throw new Error();
+        return res.json();
+      })
       .then((data) => {
-        if (data?.favorites && isMounted) {
-          const isFav = data.favorites.some((f: { ticketId: string }) => f.ticketId === ticketId);
-          setIsFavorited(isFav);
+        if (data.success && Array.isArray(data.favorites)) {
+          const match = data.favorites.some((f: { ticketId: string }) => f.ticketId === ticketId);
+          setIsFavorited(match);
         }
       })
       .catch(() => {});
-
-    return () => {
-      isMounted = false;
-    };
   }, [ticketId]);
 
-  // Handle Share link copy
-  function handleShare() {
-    if (typeof window !== "undefined") {
-      navigator.clipboard.writeText(window.location.href);
-      setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2500);
-    }
-  }
-
-  // Handle Favorite toggle
   async function handleToggleFavorite() {
     if (!ticket) return;
-
     try {
-      const res = await fetch("/api/favorites", {
-        method: "POST",
+      const method = isFavorited ? "DELETE" : "POST";
+      const url = isFavorited ? `/api/favorites?ticketId=${ticket.id}` : "/api/favorites";
+      const res = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticketId: ticket.id }),
+        body: !isFavorited ? JSON.stringify({ ticketId: ticket.id }) : undefined,
       });
 
-      const data = await res.json();
-      if (res.ok) {
-        setIsFavorited(data.isFavorited);
-      } else if (res.status === 401) {
+      if (res.status === 401) {
         router.push(`/login?redirect=/tickets/${ticket.id}`);
+        return;
       }
+
+      setIsFavorited((prev) => !prev);
     } catch (err) {
       console.error("Favorite toggle failed:", err);
     }
   }
 
-  // Handle Report submit
-  function handleSubmitReport(e: React.FormEvent) {
+  function handleShare() {
+    if (typeof window !== "undefined") {
+      navigator.clipboard.writeText(window.location.href);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    }
+  }
+
+  async function handleReportSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!reportReason) return;
-    setReportSubmitted(true);
-    setTimeout(() => {
-      setReportOpen(false);
-      setReportSubmitted(false);
-      setReportReason("");
-    }, 2000);
+    if (!reportReason.trim() || !ticket) return;
+
+    try {
+      const res = await fetch("/api/admin/fraud", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          relatedTicketId: ticket.id,
+          relatedUserId: ticket.seller?.id,
+          alertType: "USER_REPORTED_FRAUD",
+          severity: "MEDIUM",
+          details: reportReason.trim(),
+        }),
+      });
+
+      if (res.ok) {
+        setReportSubmitted(true);
+        setTimeout(() => {
+          setReportOpen(false);
+          setReportSubmitted(false);
+          setReportReason("");
+        }, 2000);
+      }
+    } catch (err) {
+      console.error("Report submit error:", err);
+    }
   }
 
   function formatDate(dateString: string | null) {
@@ -211,7 +211,7 @@ export default function TicketDetailsPage() {
       return new Date(dateString).toLocaleDateString("en-BD", {
         weekday: "short",
         day: "numeric",
-        month: "long",
+        month: "short",
         year: "numeric",
       });
     } catch {
@@ -221,10 +221,12 @@ export default function TicketDetailsPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 size={36} className="animate-spin text-[#0D9488]" />
-          <p className="text-sm font-semibold text-slate-500">Loading verified ticket details...</p>
+      <main className="min-h-screen bg-[#F8FAFC] flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <Loader2 size={36} className="animate-spin text-[#0D9488] mx-auto" />
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+            Loading ticket specifications...
+          </p>
         </div>
       </main>
     );
@@ -232,16 +234,18 @@ export default function TicketDetailsPage() {
 
   if (error || !ticket) {
     return (
-      <main className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 text-center max-w-md w-full space-y-4">
-          <div className="w-14 h-14 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto">
-            <AlertCircle size={28} />
+      <main className="min-h-screen bg-[#F8FAFC] flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white p-8 rounded-3xl border border-slate-200 text-center space-y-4 shadow-sm">
+          <div className="w-12 h-12 rounded-full bg-red-50 text-red-500 mx-auto flex items-center justify-center">
+            <AlertCircle size={24} />
           </div>
-          <h2 className="text-xl font-bold text-slate-900">Ticket Not Available</h2>
-          <p className="text-xs text-slate-500">{error || "This ticket may have expired or been removed."}</p>
+          <h2 className="text-xl font-bold text-slate-900">Ticket Unavailable</h2>
+          <p className="text-xs text-slate-500">
+            {error || "This listing has been sold or is no longer accessible on the marketplace."}
+          </p>
           <Link
             href="/tickets"
-            className="inline-flex items-center justify-center px-6 py-2.5 bg-[#0D9488] text-white text-xs font-bold rounded-xl hover:bg-[#0F766E] transition"
+            className="inline-block px-5 py-2.5 bg-[#0D9488] text-white text-xs font-bold rounded-xl hover:bg-[#0F766E] transition cursor-pointer"
           >
             Browse Other Tickets
           </Link>
@@ -250,38 +254,39 @@ export default function TicketDetailsPage() {
     );
   }
 
-  const unitPrice = ticket.price || 0;
-  const subtotal = unitPrice * quantity;
-  const escrowFee = Math.round(subtotal * 0.05); // 5% Escrow Protection Fee
-  const total = subtotal + escrowFee;
-  const isSoldOut = ticket.ticketStatus !== "AVAILABLE" || ticket.quantity <= 0;
+  const categoryStr = formatCategory(ticket.category, ticket.ticketType || "TRAVEL").toUpperCase();
   const verification = ticket.verifications?.[0];
   const isVerified = verification?.verificationStatus === "VERIFIED";
+  const itemTotal = (ticket.price || 0) * quantity;
+  const escrowFee = Math.round(itemTotal * 0.03);
+  const grandTotal = itemTotal + escrowFee;
 
   return (
-    <main className="min-h-screen bg-[#F8FAFC] text-slate-800 pb-20">
-      {/* Top Navigation Bar */}
-      <div className="max-w-6xl mx-auto px-4 pt-6 pb-4">
+    <main className="min-h-screen bg-[#F8FAFC] text-slate-800 pb-20 font-sans">
+      {/* Top Breadcrumb Bar */}
+      <div className="max-w-7xl mx-auto px-4 md:px-8 py-5">
         <Link
           href="/tickets"
-          className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-900 transition"
+          className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-[#0D9488] transition cursor-pointer"
         >
-          <ArrowLeft size={16} />
+          <ArrowLeft size={14} />
           <span>Back to Marketplace</span>
         </Link>
       </div>
 
-      <div className="max-w-6xl mx-auto px-4 grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-        {/* Main Ticket Info (Left 2 Columns) */}
-        <div className="lg:col-span-2 space-y-6">
+      <div className="max-w-7xl mx-auto px-4 md:px-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+        {/* ========================================================
+            LEFT COLUMN: TICKET DETAILS (8 cols)
+        ======================================================== */}
+        <div className="lg:col-span-8 space-y-6">
           {/* Main Card */}
-          <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden">
-            {/* Header Banner */}
+          <div className="bg-white rounded-3xl border border-slate-200/90 shadow-md overflow-hidden">
+            {/* Header with Title and Badges */}
             <div className="bg-[#1A1C43] text-white p-6 md:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
-                  <span className="text-xs font-extrabold uppercase tracking-wider px-3 py-1 rounded-full bg-[#5EEAD4]/10 text-[#5EEAD4] border border-[#5EEAD4]/30">
-                    {formatCategory(ticket.category, ticket.ticketType || "TRAVEL")}
+                  <span className="text-xs font-black uppercase tracking-wider px-3 py-1 rounded-full bg-[#5EEAD4]/10 text-[#5EEAD4] border border-[#5EEAD4]/30">
+                    {categoryStr}
                   </span>
 
                   {isVerified ? (
@@ -296,11 +301,16 @@ export default function TicketDetailsPage() {
                   )}
                 </div>
 
-                <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
+                <h1 className="text-2xl md:text-3xl font-black tracking-tight">
                   {ticket.title}
                 </h1>
-                <p className="text-xs text-slate-300 mt-1">
-                  Listing ID: <span className="font-mono">{ticket.id}</span>
+                {ticket.operatorName && (
+                  <p className="text-xs text-teal-300 font-bold mt-1">
+                    {ticket.operatorName}
+                  </p>
+                )}
+                <p className="text-xs text-slate-300 mt-1 font-mono">
+                  Listing ID: #{ticket.id.slice(-8)}
                 </p>
               </div>
 
@@ -313,7 +323,7 @@ export default function TicketDetailsPage() {
                       ? "bg-rose-500/20 border-rose-400 text-rose-300"
                       : "bg-white/10 border-white/20 text-white hover:bg-white/20"
                   }`}
-                  title={isFavorited ? "Saved in favorites" : "Save to favorites"}
+                  title={isFavorited ? "Saved in wishlist" : "Save to wishlist"}
                 >
                   <Heart size={18} className={isFavorited ? "fill-rose-400" : ""} />
                 </button>
@@ -335,10 +345,10 @@ export default function TicketDetailsPage() {
                 {/* Route */}
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">
-                    Travel Route / Venue
+                    Travel Route / Journey
                   </span>
-                  <div className="flex items-center gap-2 font-black text-slate-900 text-lg mt-1">
-                    <span>{ticket.from || "Anywhere"}</span>
+                  <div className="flex items-center gap-2 font-black text-slate-900 text-xl mt-1">
+                    <span>{ticket.from || "Origin"}</span>
                     <span className="text-[#0D9488]">➔</span>
                     <span>{ticket.to || "Destination"}</span>
                   </div>
@@ -353,7 +363,7 @@ export default function TicketDetailsPage() {
                     <CalendarDays size={16} className="text-[#0D9488]" />
                     <span>{formatDate(ticket.travelDate)}</span>
                     {ticket.travelTime && (
-                      <span className="bg-slate-200 text-slate-700 px-2 py-0.5 rounded text-xs">
+                      <span className="bg-teal-50 text-teal-800 font-extrabold px-2 py-0.5 rounded text-xs border border-teal-200">
                         {ticket.travelTime}
                       </span>
                     )}
@@ -361,29 +371,54 @@ export default function TicketDetailsPage() {
                 </div>
               </div>
 
-              {/* Seating & Quantity Specs */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs">
-                <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-100 space-y-1">
-                  <span className="text-slate-400 block font-medium">Seat / Coach</span>
-                  <span className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
-                    <Armchair size={16} className="text-[#0D9488]" />
-                    {ticket.seatNumber || "General Admission"}
-                  </span>
-                </div>
+              {/* CATEGORY-SPECIFIC SPECIFICATIONS TABLE */}
+              <div className="space-y-2">
+                <h3 className="font-extrabold text-slate-900 text-sm uppercase tracking-wide">
+                  Category Specifications
+                </h3>
 
-                <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-100 space-y-1">
-                  <span className="text-slate-400 block font-medium">Ticket Class</span>
-                  <span className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
-                    <Tag size={16} className="text-[#0D9488]" />
-                    {ticket.ticketType || "Standard"}
-                  </span>
-                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  {/* Seating Specification */}
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
+                    <span className="text-slate-400 block text-[10px] font-bold uppercase">
+                      Seat / Allocation
+                    </span>
+                    <span className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5 mt-0.5">
+                      <Armchair size={14} className="text-[#0D9488]" />
+                      {ticket.seatNumber || "General Admission"}
+                    </span>
+                  </div>
 
-                <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-100 space-y-1 col-span-2 sm:col-span-1">
-                  <span className="text-slate-400 block font-medium">Available Units</span>
-                  <span className="font-extrabold text-slate-800 text-sm">
-                    {ticket.quantity} ticket{ticket.quantity > 1 ? "s" : ""}
-                  </span>
+                  {/* Class / Coach Specification */}
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
+                    <span className="text-slate-400 block text-[10px] font-bold uppercase">
+                      Coach / Tier
+                    </span>
+                    <span className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5 mt-0.5">
+                      <Tag size={14} className="text-[#0D9488]" />
+                      {ticket.coachType || ticket.ticketType || "Standard"}
+                    </span>
+                  </div>
+
+                  {/* Bogey / Compartment or Boarding */}
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
+                    <span className="text-slate-400 block text-[10px] font-bold uppercase">
+                      {categoryStr.includes("TRAIN") ? "Bogey / Compartment" : "Boarding Point"}
+                    </span>
+                    <span className="font-extrabold text-slate-800 text-sm block mt-0.5 truncate">
+                      {ticket.bogeyNumber || ticket.boardingPoint || "Main Terminal / Counter"}
+                    </span>
+                  </div>
+
+                  {/* Available Stock */}
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
+                    <span className="text-slate-400 block text-[10px] font-bold uppercase">
+                      Available Stock
+                    </span>
+                    <span className="font-extrabold text-slate-800 text-sm block mt-0.5">
+                      {ticket.quantity} ticket{ticket.quantity > 1 ? "s" : ""}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -391,32 +426,32 @@ export default function TicketDetailsPage() {
               <div className="space-y-2">
                 <h3 className="font-bold text-slate-900 text-sm">Ticket Description & Seller Notes</h3>
                 <p className="text-xs text-slate-600 leading-relaxed bg-slate-50/60 p-4 rounded-2xl border border-slate-100">
-                  {ticket.description || "No specific instructions provided by the seller. This ticket will be transferred directly to your buyer account upon purchase."}
+                  {ticket.description || "Original ticket ready for secure transfer. Protected by TicketLagbe Escrow Guarantee."}
                 </p>
               </div>
 
               {/* AI Verification Breakdown */}
-              <div className="p-5 rounded-2xl bg-teal-50/60 border border-teal-100 space-y-2">
-                <div className="flex items-center gap-2 text-teal-800 font-bold text-xs">
+              <div className="p-5 rounded-2xl bg-teal-50/70 border border-teal-200/80 space-y-2">
+                <div className="flex items-center gap-2 text-teal-900 font-extrabold text-xs">
                   <Sparkles size={16} className="text-[#0D9488]" />
-                  <span>TicketLagbe AI Authenticity Check</span>
+                  <span>TicketLagbe AI Authenticity & Fraud Screening</span>
                 </div>
-                <p className="text-[11px] text-teal-700">
-                  {verification?.decision || "Automated OCR scan checked ticket format, operator timestamp, and duplicate seat entries across our national database."}
+                <p className="text-[11px] text-teal-800 leading-relaxed">
+                  {verification?.decision || "Automated scan validated ticket code, operator timestamps, and seat uniqueness against our national registry."}
                 </p>
-                <div className="flex items-center gap-4 text-[10px] text-teal-600 pt-1 font-semibold">
-                  <span>Confidence Score: {Math.round((verification?.aiConfidenceScore || 0.9) * 100)}%</span>
+                <div className="flex items-center gap-4 text-[10px] text-teal-700 pt-1 font-bold">
+                  <span>Confidence Score: {Math.round((verification?.aiConfidenceScore || 0.92) * 100)}%</span>
                   <span>•</span>
-                  <span>Escrow Guarantee: 100% Refundable if Invalid</span>
+                  <span>100% Escrow Refund Guarantee</span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Seller Trust Profile Card */}
-          <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          {/* Seller Trust Profile & Direct Chat Box */}
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-md p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-[#1A1C43] text-[#5EEAD4] font-black flex items-center justify-center text-sm">
+              <div className="w-12 h-12 rounded-2xl bg-[#1A1C43] text-[#5EEAD4] font-black flex items-center justify-center text-sm shadow-sm">
                 {ticket.seller?.fullName?.substring(0, 2).toUpperCase() || "TL"}
               </div>
               <div>
@@ -441,122 +476,120 @@ export default function TicketDetailsPage() {
               </div>
             </div>
 
-            {/* Actions: Contact Seller & Report */}
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setInquiryOpen(true)}
-                className="text-xs font-semibold text-[#0D9488] hover:text-[#0F766E] flex items-center gap-1.5 transition cursor-pointer bg-teal-50 px-3 py-1.5 rounded-xl border border-teal-200"
+            {/* Direct Chat with Seller Link */}
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <Link
+                href={`/messages?ticketId=${ticket.id}&sellerId=${ticket.seller?.id || ""}`}
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs shadow-md transition"
               >
-                <MessageSquare size={14} />
-                <span>Message Seller</span>
-              </button>
+                <MessageSquare size={15} />
+                <span>Chat with Seller</span>
+              </Link>
 
               <button
                 onClick={() => setReportOpen(true)}
-                className="text-xs font-semibold text-slate-400 hover:text-red-500 flex items-center gap-1 transition cursor-pointer"
+                className="px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 text-xs font-semibold flex items-center gap-1 transition"
+                title="Report Fraud"
               >
-                <Flag size={14} />
+                <Flag size={13} />
                 <span>Report</span>
               </button>
             </div>
           </div>
         </div>
 
-        {/* Purchase & Checkout Sidebar (Right Column) */}
-        <div className="space-y-6 sticky top-24">
-          <div className="bg-white rounded-3xl border border-slate-200/80 shadow-lg p-6 space-y-6">
-            <div>
-              <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
-                Price per ticket
-              </span>
-              <div className="flex items-baseline gap-2 mt-1">
-                <span className="text-3xl font-black text-[#0D9488]">
-                  ৳{unitPrice.toLocaleString()}
+        {/* ========================================================
+            RIGHT COLUMN: ESCROW CHECKOUT SUMMARY (4 cols)
+        ======================================================== */}
+        <div className="lg:col-span-4 space-y-6">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-xl p-6 space-y-6 sticky top-24">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div>
+                <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">
+                  Per Ticket Price
                 </span>
-                <span className="text-xs text-slate-400">BDT</span>
+                <span className="text-3xl font-black text-[#0D9488]">
+                  ৳{ticket.price?.toLocaleString()}
+                </span>
               </div>
+              <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 text-[11px] font-bold border border-emerald-200">
+                In Stock ({ticket.quantity})
+              </span>
             </div>
 
             {/* Quantity Selector */}
-            {!isSoldOut && (
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-700 block">Select Quantity</label>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                    disabled={quantity <= 1}
-                    className="w-10 h-10 rounded-xl border border-slate-200 text-slate-700 font-bold hover:bg-slate-100 disabled:opacity-40 transition cursor-pointer"
-                  >
-                    -
-                  </button>
-                  <span className="font-extrabold text-base w-8 text-center text-slate-900">
-                    {quantity}
-                  </span>
-                  <button
-                    onClick={() => setQuantity((q) => Math.min(ticket.quantity, q + 1))}
-                    disabled={quantity >= ticket.quantity}
-                    className="w-10 h-10 rounded-xl border border-slate-200 text-slate-700 font-bold hover:bg-slate-100 disabled:opacity-40 transition cursor-pointer"
-                  >
-                    +
-                  </button>
-                  <span className="text-xs text-slate-400 ml-auto">
-                    Max: {ticket.quantity} available
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* Price Breakdown Calculation */}
-            <div className="space-y-2.5 pt-4 border-t border-slate-100 text-xs">
-              <div className="flex justify-between text-slate-600">
-                <span>Tickets ({quantity}x)</span>
-                <span className="font-bold text-slate-900">৳{subtotal.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between text-slate-600">
-                <span className="flex items-center gap-1">
-                  <span>Escrow Protection Fee (5%)</span>
-                  <Info size={12} className="text-slate-400" />
-                </span>
-                <span className="font-bold text-slate-900">৳{escrowFee.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between text-sm font-black text-slate-900 pt-2 border-t border-slate-100">
-                <span>Total Amount</span>
-                <span className="text-[#0D9488]">৳{total.toLocaleString()}</span>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 block">
+                Select Quantity
+              </label>
+              <div className="flex items-center gap-2">
+                <select
+                  value={quantity}
+                  onChange={(e) => setQuantity(Number(e.target.value))}
+                  className="flex-1 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-[#0D9488] focus:bg-white"
+                >
+                  {Array.from({ length: Math.min(ticket.quantity, 6) }, (_, i) => i + 1).map((n) => (
+                    <option key={n} value={n}>
+                      {n} Ticket{n > 1 ? "s" : ""}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
-            {/* Buy / Sold Out Button */}
-            {isSoldOut ? (
-              <button
-                disabled
-                className="w-full py-4 bg-slate-200 text-slate-400 font-bold rounded-2xl text-xs uppercase tracking-wider cursor-not-allowed"
-              >
-                Ticket Sold Out
-              </button>
-            ) : (
+            {/* Price Breakdown */}
+            <div className="space-y-2 text-xs pt-3 border-t border-slate-100">
+              <div className="flex items-center justify-between text-slate-500">
+                <span>Subtotal ({quantity} tickets)</span>
+                <span className="font-semibold text-slate-800">৳{itemTotal.toLocaleString()}</span>
+              </div>
+              <div className="flex items-center justify-between text-slate-500">
+                <span className="flex items-center gap-1">
+                  <span>Escrow Guarantee Fee (3%)</span>
+                </span>
+                <span className="font-semibold text-slate-800">৳{escrowFee.toLocaleString()}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm font-black text-slate-900 pt-2 border-t border-slate-100">
+                <span>Total Amount</span>
+                <span className="text-teal-700 text-lg">৳{grandTotal.toLocaleString()}</span>
+              </div>
+            </div>
+
+            {/* Escrow Trust Box */}
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1.5 text-slate-600 text-xs">
+              <div className="flex items-center gap-1.5 text-emerald-700 font-bold text-xs">
+                <ShieldCheck size={16} />
+                <span>100% Escrow Protection</span>
+              </div>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Your payment is held safely in escrow. The seller is only paid after you verify and use the ticket.
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-2.5 pt-2">
               <button
                 onClick={handleProceedToCheckout}
                 disabled={navigatingCheckout}
-                className="w-full py-4 bg-[#0D9488] hover:bg-[#0F766E] text-white font-extrabold rounded-2xl text-sm transition shadow-lg flex items-center justify-center gap-2 cursor-pointer disabled:opacity-75"
+                className="w-full py-3.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white rounded-2xl font-black text-xs shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
               >
                 {navigatingCheckout ? (
-                  <Loader2 size={18} className="animate-spin" />
+                  <Loader2 size={16} className="animate-spin" />
                 ) : (
-                  <ShoppingCart size={18} />
+                  <>
+                    <ShoppingCart size={16} />
+                    <span>Buy with Escrow Protection</span>
+                  </>
                 )}
-                <span>{navigatingCheckout ? "Checking Security..." : "Proceed to Checkout"}</span>
               </button>
-            )}
 
-            {/* Security Guarantee Box */}
-            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 space-y-1.5 text-[11px] text-slate-500">
-              <div className="flex items-center gap-1.5 font-bold text-slate-700">
-                <ShieldCheck size={14} className="text-[#0D9488]" />
-                <span>TicketLagbe Guarantee</span>
-              </div>
-              <p>
-                Funds are held in secure Escrow. The seller is only paid after your journey or event is successfully validated.
-              </p>
+              <Link
+                href={`/messages?ticketId=${ticket.id}&sellerId=${ticket.seller?.id || ""}`}
+                className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-2xl font-bold text-xs transition flex items-center justify-center gap-2"
+              >
+                <MessageSquare size={15} className="text-teal-600" />
+                <span>Chat with Seller First</span>
+              </Link>
             </div>
           </div>
         </div>
@@ -564,153 +597,44 @@ export default function TicketDetailsPage() {
 
       {/* Report Modal */}
       {reportOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
-                <Flag size={18} className="text-red-500" />
-                <span>Report Suspicious Listing</span>
-              </h3>
-              <button
-                onClick={() => setReportOpen(false)}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold"
-              >
-                ✕
-              </button>
-            </div>
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+              <Flag size={16} className="text-red-500" />
+              <span>Report Suspicious Ticket</span>
+            </h3>
 
             {reportSubmitted ? (
-              <div className="py-6 text-center space-y-2">
-                <CheckCircle2 size={36} className="text-emerald-500 mx-auto" />
-                <p className="font-bold text-slate-900 text-sm">Report Submitted</p>
-                <p className="text-xs text-slate-500">
-                  Our trust & safety team has been alerted and will inspect this listing.
-                </p>
+              <div className="p-4 bg-emerald-50 rounded-2xl text-xs text-emerald-700 font-bold flex items-center gap-2">
+                <CheckCircle2 size={16} />
+                <span>Report submitted to admin for investigation.</span>
               </div>
             ) : (
-              <form onSubmit={handleSubmitReport} className="space-y-4">
+              <form onSubmit={handleReportSubmit} className="space-y-3">
                 <p className="text-xs text-slate-500">
-                  Please specify why you are reporting this ticket. Reports are reviewed by human admins immediately.
+                  Please describe the reason for reporting (e.g. fake document, mismatched seat, or duplicate code).
                 </p>
-
-                <select
-                  required
+                <textarea
+                  rows={3}
                   value={reportReason}
                   onChange={(e) => setReportReason(e.target.value)}
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488]"
-                >
-                  <option value="">Select violation type...</option>
-                  <option value="FAKE_TICKET">Suspected Fake / Altered Ticket</option>
-                  <option value="DUPLICATE">Duplicate Seat Listing</option>
-                  <option value="INCORRECT_DETAILS">Wrong Route, Date or Price</option>
-                  <option value="PRICE_GOUGING">Unreasonable Price Gouging</option>
-                  <option value="OTHER">Other Violation</option>
-                </select>
-
-                <div className="flex items-center justify-end gap-2 pt-2">
+                  placeholder="Explain why this listing is suspicious..."
+                  required
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:border-red-500"
+                />
+                <div className="flex justify-end gap-2 pt-2">
                   <button
                     type="button"
                     onClick={() => setReportOpen(false)}
-                    className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50"
+                    className="px-4 py-2 bg-slate-100 text-slate-600 font-bold text-xs rounded-xl"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 bg-red-600 text-white rounded-xl text-xs font-bold hover:bg-red-700 transition"
+                    className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-xl"
                   >
                     Submit Report
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Direct Seller Inquiry Modal */}
-      {inquiryOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
-                <MessageSquare size={18} className="text-[#0D9488]" />
-                <span>Message Verified Seller</span>
-              </h3>
-              <button
-                onClick={() => setInquiryOpen(false)}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            {inquirySent ? (
-              <div className="py-8 text-center space-y-2">
-                <CheckCircle2 size={36} className="text-emerald-500 mx-auto" />
-                <h4 className="font-bold text-slate-900 text-sm">Message Delivered!</h4>
-                <p className="text-xs text-slate-500">
-                  Your inquiry has been forwarded to {ticket.seller?.fullName || "the seller"}. You will receive a notification when they reply.
-                </p>
-              </div>
-            ) : (
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  if (!inquiryMessage.trim()) return;
-                  try {
-                    setInquiryLoading(true);
-                    const res = await fetch("/api/inquiries", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        ticketId,
-                        message: inquiryMessage,
-                      }),
-                    });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.message || "Failed to send message.");
-                    setInquirySent(true);
-                    setTimeout(() => {
-                      setInquiryOpen(false);
-                      setInquirySent(false);
-                      setInquiryMessage("");
-                    }, 2200);
-                  } catch (err: unknown) {
-                    alert(err instanceof Error ? err.message : "Error sending message.");
-                  } finally {
-                    setInquiryLoading(false);
-                  }
-                }}
-                className="space-y-4"
-              >
-                <p className="text-xs text-slate-500">
-                  Have a question regarding boarding time, luggage allowance, or seat location? Ask the verified seller directly:
-                </p>
-
-                <textarea
-                  required
-                  rows={4}
-                  value={inquiryMessage}
-                  onChange={(e) => setInquiryMessage(e.target.value)}
-                  placeholder="e.g. Hi, is this seat near a window? Can you transfer the ticket 2 hours before departure?..."
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488]"
-                />
-
-                <div className="flex items-center justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setInquiryOpen(false)}
-                    className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={inquiryLoading || !inquiryMessage.trim()}
-                    className="px-5 py-2 bg-[#0D9488] text-white rounded-xl text-xs font-bold hover:bg-[#0F766E] transition disabled:opacity-50"
-                  >
-                    {inquiryLoading ? "Sending..." : "Send Message"}
                   </button>
                 </div>
               </form>

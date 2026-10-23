@@ -470,6 +470,43 @@ function AdminDashboardContent() {
               </div>
             </div>
 
+            {/* Category Listing Distribution Breakdown */}
+            <div className="bg-[#181A38] border border-slate-800 rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                  <Ticket size={16} className="text-teal-400" />
+                  <span>Category-wise Listing Inventory</span>
+                </h3>
+                <span className="text-[11px] text-slate-400 font-medium">Real-time marketplace distribution</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3 bg-[#111327] rounded-xl border border-indigo-900/40">
+                  <span className="text-[10px] text-indigo-400 font-bold uppercase">Train Tickets</span>
+                  <p className="text-lg font-black text-white mt-1">
+                    {tickets.filter(t => (t.title || "").toUpperCase().includes("TRAIN") || (t.title || "").toUpperCase().includes("EXPRESS")).length}
+                  </p>
+                </div>
+                <div className="p-3 bg-[#111327] rounded-xl border border-teal-900/40">
+                  <span className="text-[10px] text-teal-400 font-bold uppercase">Bus Tickets</span>
+                  <p className="text-lg font-black text-white mt-1">
+                    {tickets.filter(t => (t.title || "").toUpperCase().includes("BUS") || (t.title || "").toUpperCase().includes("PARIBAHAN") || (t.title || "").toUpperCase().includes("TRAVELS")).length}
+                  </p>
+                </div>
+                <div className="p-3 bg-[#111327] rounded-xl border border-sky-900/40">
+                  <span className="text-[10px] text-sky-400 font-bold uppercase">Air Flights</span>
+                  <p className="text-lg font-black text-white mt-1">
+                    {tickets.filter(t => (t.title || "").toUpperCase().includes("AIR") || (t.title || "").toUpperCase().includes("FLIGHT") || (t.title || "").toUpperCase().includes("BIMAN")).length}
+                  </p>
+                </div>
+                <div className="p-3 bg-[#111327] rounded-xl border border-amber-900/40">
+                  <span className="text-[10px] text-amber-400 font-bold uppercase">Events & Shows</span>
+                  <p className="text-lg font-black text-white mt-1">
+                    {tickets.filter(t => (t.title || "").toUpperCase().includes("CONCERT") || (t.title || "").toUpperCase().includes("EVENT") || (t.title || "").toUpperCase().includes("PASS")).length}
+                  </p>
+                </div>
+              </div>
+            </div>
+
             {/* Quick Operations Matrix */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Recent Orders Overview */}

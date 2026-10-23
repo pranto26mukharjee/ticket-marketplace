@@ -19,6 +19,10 @@ import {
   Armchair,
   ArrowRight,
   Info,
+  Building,
+  Plane,
+  Bus,
+  Train,
   Check,
 } from "lucide-react";
 
@@ -54,19 +58,42 @@ export default function CreateListingPage() {
     checkAuth();
   }, []);
 
-  // Form states
+  // Category State
+  const [category, setCategory] = useState<"TRAIN" | "BUS" | "FLIGHT" | "EVENT">("TRAIN");
+
+  // Common Fields
   const [title, setTitle] = useState("");
-  const [category, setCategory] = useState("TRAIN");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [travelDate, setTravelDate] = useState("");
   const [travelTime, setTravelTime] = useState("");
-  const [seatNumber, setSeatNumber] = useState("");
-  const [ticketType, setTicketType] = useState("Standard / AC");
   const [price, setPrice] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [ticketCode, setTicketCode] = useState("");
   const [description, setDescription] = useState("");
+
+  // Specialized Fields for Train
+  const [trainName, setTrainName] = useState("Sonar Bangla Express");
+  const [trainClass, setTrainClass] = useState("Snigdha (AC Chair)");
+  const [bogeyNumber, setBogeyNumber] = useState("");
+  const [trainSeat, setTrainSeat] = useState("");
+
+  // Specialized Fields for Bus
+  const [busOperator, setBusOperator] = useState("Green Line Paribahan");
+  const [busCoachType, setBusCoachType] = useState("AC Business Class");
+  const [boardingPoint, setBoardingPoint] = useState("");
+  const [droppingPoint, setDroppingPoint] = useState("");
+  const [busSeat, setBusSeat] = useState("");
+
+  // Specialized Fields for Flight
+  const [airline, setAirline] = useState("Biman Bangladesh Airlines");
+  const [flightNumber, setFlightNumber] = useState("");
+  const [flightClass, setFlightClass] = useState("Economy");
+
+  // Specialized Fields for Event
+  const [eventName, setEventName] = useState("");
+  const [eventVenue, setEventVenue] = useState("");
+  const [eventZone, setEventZone] = useState("VIP Pass");
 
   // File upload state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -80,18 +107,29 @@ export default function CreateListingPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  // Auto-generate Title when Category or Specifics change
+  useEffect(() => {
+    if (category === "TRAIN") {
+      setTitle(`${trainName} - ${trainClass}`);
+    } else if (category === "BUS") {
+      setTitle(`${busOperator} (${busCoachType})`);
+    } else if (category === "FLIGHT") {
+      setTitle(`${airline} ${flightNumber ? `(${flightNumber})` : ""}`);
+    } else if (category === "EVENT") {
+      setTitle(eventName ? `${eventName} (${eventZone})` : "Event Ticket");
+    }
+  }, [category, trainName, trainClass, busOperator, busCoachType, airline, flightNumber, eventName, eventZone]);
+
   // Handle Document Selection and Immediate Upload
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Validate size (10MB)
     if (file.size > 10 * 1024 * 1024) {
       setFileError("Document exceeds maximum size of 10MB.");
       return;
     }
 
-    // Validate extension
     const validExts = ["pdf", "jpg", "jpeg", "png", "webp"];
     const ext = file.name.split(".").pop()?.toLowerCase();
     if (!ext || !validExts.includes(ext)) {
@@ -141,6 +179,35 @@ export default function CreateListingPage() {
       return;
     }
 
+    // Resolve category-specific metadata
+    let resolvedOperator = "";
+    let resolvedCoachType = "";
+    let resolvedSeat = "";
+    let resolvedBoarding = "";
+    let resolvedDropping = "";
+    let resolvedBogey = "";
+
+    if (category === "TRAIN") {
+      resolvedOperator = trainName;
+      resolvedCoachType = trainClass;
+      resolvedSeat = trainSeat;
+      resolvedBogey = bogeyNumber;
+    } else if (category === "BUS") {
+      resolvedOperator = busOperator;
+      resolvedCoachType = busCoachType;
+      resolvedSeat = busSeat;
+      resolvedBoarding = boardingPoint;
+      resolvedDropping = droppingPoint;
+    } else if (category === "FLIGHT") {
+      resolvedOperator = airline;
+      resolvedCoachType = `${flightClass} ${flightNumber ? `(${flightNumber})` : ""}`;
+      resolvedSeat = trainSeat || "Assigned at check-in";
+    } else if (category === "EVENT") {
+      resolvedOperator = eventVenue;
+      resolvedCoachType = eventZone;
+      resolvedSeat = eventZone;
+    }
+
     try {
       setSubmitting(true);
       setAiAnalyzing(true);
@@ -155,13 +222,18 @@ export default function CreateListingPage() {
           to: to.trim(),
           travelDate,
           travelTime: travelTime.trim() || null,
-          seatNumber: seatNumber.trim() || null,
-          ticketType: ticketType.trim() || null,
+          seatNumber: resolvedSeat.trim() || null,
+          ticketType: resolvedCoachType.trim() || null,
           price: Number(price),
           quantity: Number(quantity) || 1,
           ticketCode: ticketCode.trim() || null,
           description: description.trim() || null,
           documentUrl,
+          operatorName: resolvedOperator.trim() || null,
+          coachType: resolvedCoachType.trim() || null,
+          boardingPoint: resolvedBoarding.trim() || null,
+          droppingPoint: resolvedDropping.trim() || null,
+          bogeyNumber: resolvedBogey.trim() || null,
         }),
       });
 
@@ -198,13 +270,12 @@ export default function CreateListingPage() {
           ) : (
             <>
               <p className="text-sm text-red-700">{authError}</p>
-              <button
-                type="button"
-                onClick={() => window.location.reload()}
-                className="px-5 py-2.5 rounded-xl bg-[#0D9488] text-white font-semibold text-sm"
+              <Link
+                href="/login?redirect=/create-listing"
+                className="inline-block bg-[#0D9488] text-white px-5 py-2.5 rounded-xl font-bold text-xs"
               >
-                Retry
-              </button>
+                Go to Sign In
+              </Link>
             </>
           )}
         </div>
@@ -213,304 +284,546 @@ export default function CreateListingPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#F8FAFC] text-slate-800 py-12 px-4">
-      <div className="max-w-3xl mx-auto space-y-6">
-        {/* Header Title */}
+    <main className="min-h-screen bg-[#F8FAFC] py-10 px-4 font-sans">
+      <div className="max-w-4xl mx-auto space-y-8">
+        {/* Top Header */}
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#5EEAD4]/10 text-[#0D9488] border border-[#5EEAD4]/30 text-xs font-bold mb-1">
-            <Sparkles size={14} />
-            <span>AI Automated Ticket Verification</span>
+          <div className="inline-flex items-center gap-1.5 bg-[#ECFDF5] border border-[#A7F3D0] px-3 py-1 rounded-full text-xs font-bold text-[#065F46]">
+            <ShieldCheck size={15} />
+            <span>AI Verified & Escrow Protected Listing</span>
           </div>
-          <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight">
-            List a Spare Ticket for Sale
+          <h1 className="text-3xl md:text-4xl font-black text-[#1E293B] tracking-tight">
+            List Your Ticket for Resale
           </h1>
-          <p className="text-xs sm:text-sm text-slate-500 max-w-lg mx-auto">
-            Upload your genuine e-ticket. Our AI screens the document format, route timestamps, and ensures zero duplication.
+          <p className="text-slate-500 text-xs md:text-sm max-w-xl mx-auto">
+            Select your travel mode below. Customized verification forms are provided for Bus, Train, Flight, and Event tickets.
           </p>
         </div>
 
-        {/* Error and Success Alerts */}
-        {error && (
-          <div className="p-4 bg-red-50 border border-red-200 rounded-2xl text-xs text-red-700 font-bold flex items-center gap-2">
-            <AlertCircle size={18} className="shrink-0" />
-            <span>{error}</span>
+        {/* ========================================================
+            CATEGORY SELECTOR TABS (Bus, Train, Flight, Event)
+        ======================================================== */}
+        <div className="bg-white p-3 rounded-3xl border border-slate-200 shadow-md">
+          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 px-3">
+            Step 1: Choose Ticket Category
           </div>
-        )}
-
-        {success && (
-          <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-800 font-bold flex items-center gap-2">
-            <CheckCircle2 size={18} className="shrink-0" />
-            <span>{success}</span>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            {[
+              {
+                id: "TRAIN",
+                label: "Train Ticket",
+                sub: "Railway, Bogey & Seat",
+                icon: Train,
+                color: "from-indigo-600 to-purple-600",
+                activeBg: "bg-indigo-50 border-indigo-500 text-indigo-900",
+              },
+              {
+                id: "BUS",
+                label: "Bus Ticket",
+                sub: "Operator, AC / Sleeper",
+                icon: Bus,
+                color: "from-teal-600 to-emerald-600",
+                activeBg: "bg-teal-50 border-teal-500 text-teal-900",
+              },
+              {
+                id: "FLIGHT",
+                label: "Flight / Air",
+                sub: "Airline & Flight No.",
+                icon: Plane,
+                color: "from-sky-600 to-blue-600",
+                activeBg: "bg-sky-50 border-sky-500 text-sky-900",
+              },
+              {
+                id: "EVENT",
+                label: "Event & Concert",
+                sub: "Venue, Gate & Zone",
+                icon: Ticket,
+                color: "from-amber-600 to-orange-600",
+                activeBg: "bg-amber-50 border-amber-500 text-amber-900",
+              },
+            ].map((tab) => {
+              const Icon = tab.icon;
+              const isSelected = category === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setCategory(tab.id as typeof category)}
+                  className={`p-3.5 rounded-2xl border text-left transition flex items-center gap-3 cursor-pointer ${
+                    isSelected
+                      ? `${tab.activeBg} shadow-sm border-2`
+                      : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700"
+                  }`}
+                >
+                  <div
+                    className={`w-10 h-10 rounded-xl bg-gradient-to-tr ${tab.color} text-white flex items-center justify-center shrink-0 shadow-sm`}
+                  >
+                    <Icon size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-xs">{tab.label}</h3>
+                    <p className="text-[10px] text-slate-500">{tab.sub}</p>
+                  </div>
+                </button>
+              );
+            })}
           </div>
-        )}
+        </div>
 
-        {/* Listing Form Card */}
-        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xl p-6 sm:p-8 space-y-6">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Step 1: Category & Title */}
-            <div className="space-y-4">
-              <h2 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2 border-b border-slate-100 pb-2">
-                <span className="w-5 h-5 rounded-full bg-[#1A1C43] text-white flex items-center justify-center text-[10px]">1</span>
-                <span>Category & Listing Title</span>
-              </h2>
+        {/* ========================================================
+            FORM CONTAINER
+        ======================================================== */}
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Main Details Card */}
+          <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xl space-y-6">
+            <h2 className="text-base font-black text-[#1E293B] flex items-center gap-2 border-b border-slate-100 pb-3">
+              <Sparkles size={18} className="text-teal-600" />
+              <span>
+                Step 2: Enter {category === "TRAIN" ? "Train" : category === "BUS" ? "Bus" : category === "FLIGHT" ? "Flight" : "Event"} Details
+              </span>
+            </h2>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* CATEGORY-SPECIFIC INPUTS */}
+            {category === "TRAIN" && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100">
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Transport / Event Category *
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Bangladesh Railway Train Name *
                   </label>
                   <select
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488] cursor-pointer"
+                    value={trainName}
+                    onChange={(e) => setTrainName(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-indigo-600"
                   >
-                    <option value="TRAIN">Train (Bangladesh Railway)</option>
-                    <option value="BUS">Bus (Intercity Coach)</option>
-                    <option value="FLIGHT">Flight (Domestic)</option>
-                    <option value="LAUNCH">Launch (Riverway)</option>
-                    <option value="CONCERT">Concert / Musical Event</option>
-                    <option value="MOVIE">Cinema / Movie Pass</option>
+                    <option value="Sonar Bangla Express">Sonar Bangla Express (788/787)</option>
+                    <option value="Suborno Express">Suborno Express (701/702)</option>
+                    <option value="Parabat Express">Parabat Express (709/710)</option>
+                    <option value="Silkcity Express">Silkcity Express (753/754)</option>
+                    <option value="Kalni Express">Kalni Express (773/774)</option>
+                    <option value="Mahanagar Provati">Mahanagar Provati (703/704)</option>
+                    <option value="Chitra Express">Chitra Express (763/764)</option>
+                    <option value="Upaban Express">Upaban Express (739/740)</option>
+                    <option value="Other Train">Other / Intercity Train</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Listing Title *
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Train Coach Class *
+                  </label>
+                  <select
+                    value={trainClass}
+                    onChange={(e) => setTrainClass(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-indigo-600"
+                  >
+                    <option value="Snigdha (AC Chair)">Snigdha (AC Chair)</option>
+                    <option value="AC Berth (Cabin Sleeper)">AC Berth (Cabin Sleeper)</option>
+                    <option value="Shovon Chair">Shovon Chair</option>
+                    <option value="Shovon">Shovon</option>
+                    <option value="First Class Chair">First Class Chair</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Bogey / Compartment (e.g. Ka, Kha, Ga, Cha)
                   </label>
                   <input
                     type="text"
-                    required
-                    placeholder="e.g. Subarna Express Snigdha Seat"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488]"
+                    placeholder="e.g. Cha, Jha, Bogey 4"
+                    value={bogeyNumber}
+                    onChange={(e) => setBogeyNumber(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-indigo-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Seat Number(s) *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 14, 15 or A1"
+                    value={trainSeat}
+                    onChange={(e) => setTrainSeat(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-indigo-600"
                   />
                 </div>
               </div>
-            </div>
+            )}
 
-            {/* Step 2: Route & Schedule */}
-            <div className="space-y-4">
-              <h2 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2 border-b border-slate-100 pb-2">
-                <span className="w-5 h-5 rounded-full bg-[#1A1C43] text-white flex items-center justify-center text-[10px]">2</span>
-                <span>Route, Date & Schedule</span>
-              </h2>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {category === "BUS" && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-teal-50/50 p-4 rounded-2xl border border-teal-100">
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Origin Station / City (From) *
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Bus Operator Name *
+                  </label>
+                  <select
+                    value={busOperator}
+                    onChange={(e) => setBusOperator(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-teal-600"
+                  >
+                    <option value="Green Line Paribahan">Green Line Paribahan</option>
+                    <option value="Shohagh Paribahan">Shohagh Paribahan</option>
+                    <option value="Hanif Enterprise">Hanif Enterprise</option>
+                    <option value="Ena Transport">Ena Transport</option>
+                    <option value="Shyamoli NR Travels">Shyamoli NR Travels</option>
+                    <option value="Desh Travels">Desh Travels</option>
+                    <option value="Saintmartin Travels">Saintmartin Travels</option>
+                    <option value="London Express">London Express</option>
+                    <option value="Other Operator">Other Bus Operator</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Bus Coach Type *
+                  </label>
+                  <select
+                    value={busCoachType}
+                    onChange={(e) => setBusCoachType(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-teal-600"
+                  >
+                    <option value="AC Business Class (Hyundai / Scania)">AC Business Class (Hyundai / Scania)</option>
+                    <option value="AC Deluxe (Hino 1J)">AC Deluxe (Hino 1J)</option>
+                    <option value="Sleeper Coach (Single / Double)">Sleeper Coach (Single / Double)</option>
+                    <option value="Non-AC Chair Coach">Non-AC Chair Coach</option>
+                    <option value="Double Decker Bus">Double Decker Bus</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Boarding Point / Counter *
                   </label>
                   <input
                     type="text"
-                    required
-                    placeholder="e.g. Dhaka (Kamalapur)"
-                    value={from}
-                    onChange={(e) => setFrom(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488]"
+                    placeholder="e.g. Sayedabad Counter, Gabtoli, Arambagh"
+                    value={boardingPoint}
+                    onChange={(e) => setBoardingPoint(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-teal-600"
                   />
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Destination Station / City (To) *
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Seat Number(s) (e.g. A1, B2) *
                   </label>
                   <input
                     type="text"
-                    required
-                    placeholder="e.g. Chittagong"
-                    value={to}
-                    onChange={(e) => setTo(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488]"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Departure Date *
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={travelDate}
-                    onChange={(e) => setTravelDate(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488] cursor-pointer"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Departure Time (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 07:00 AM"
-                    value={travelTime}
-                    onChange={(e) => setTravelTime(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488]"
+                    placeholder="e.g. A1, B2, C3"
+                    value={busSeat}
+                    onChange={(e) => setBusSeat(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-teal-600"
                   />
                 </div>
               </div>
-            </div>
+            )}
 
-            {/* Step 3: Seating & Pricing */}
-            <div className="space-y-4">
-              <h2 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2 border-b border-slate-100 pb-2">
-                <span className="w-5 h-5 rounded-full bg-[#1A1C43] text-white flex items-center justify-center text-[10px]">3</span>
-                <span>Seat, Inventory & Price</span>
-              </h2>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {category === "FLIGHT" && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-sky-50/50 p-4 rounded-2xl border border-sky-100">
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Seat Number / Coach
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Airline *
+                  </label>
+                  <select
+                    value={airline}
+                    onChange={(e) => setAirline(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-sky-600"
+                  >
+                    <option value="Biman Bangladesh Airlines">Biman Bangladesh Airlines</option>
+                    <option value="US-Bangla Airlines">US-Bangla Airlines</option>
+                    <option value="Novoair">Novoair</option>
+                    <option value="Air Astra">Air Astra</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Flight Number (e.g. BG-433, BS-101)
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. Kha-14 or G-12"
-                    value={seatNumber}
-                    onChange={(e) => setSeatNumber(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488]"
+                    placeholder="e.g. BG-433"
+                    value={flightNumber}
+                    onChange={(e) => setFlightNumber(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-sky-600"
                   />
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Available Quantity *
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Cabin Class *
                   </label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={quantity}
-                    onChange={(e) => setQuantity(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488]"
-                  />
+                  <select
+                    value={flightClass}
+                    onChange={(e) => setFlightClass(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-sky-600"
+                  >
+                    <option value="Economy Class">Economy Class</option>
+                    <option value="Premium Economy">Premium Economy</option>
+                    <option value="Business Class">Business Class</option>
+                  </select>
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Asking Price (৳ BDT) *
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    PNR / Airline Booking Code
                   </label>
                   <input
-                    type="number"
-                    min="1"
-                    required
-                    placeholder="৳ 850"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-[#0D9488] outline-none focus:ring-2 focus:ring-[#0D9488]"
+                    type="text"
+                    placeholder="e.g. 6-Character PNR (X94B2Q)"
+                    value={ticketCode}
+                    onChange={(e) => setTicketCode(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-sky-600"
                   />
                 </div>
               </div>
+            )}
 
-              {/* Booking Reference / PNR for duplicate screening */}
+            {category === "EVENT" && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-amber-50/50 p-4 rounded-2xl border border-amber-100">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Event / Concert Title *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Coke Studio Concert, BPL Cricket Final"
+                    value={eventName}
+                    onChange={(e) => setEventName(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-amber-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Auditorium / Stadium Venue *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Army Stadium, ICCB Hall 4, Mirpur Stadium"
+                    value={eventVenue}
+                    onChange={(e) => setEventVenue(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-amber-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Zone / Tier Type *
+                  </label>
+                  <select
+                    value={eventZone}
+                    onChange={(e) => setEventZone(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-amber-600"
+                  >
+                    <option value="VIP Pass">VIP Pass</option>
+                    <option value="Fan Zone / Pit">Fan Zone / Pit</option>
+                    <option value="General Admission">General Admission</option>
+                    <option value="Grand Stand / Gallery">Grand Stand / Gallery</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Ticket / Barcode Number
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. E-Ticket serial or pass code"
+                    value={ticketCode}
+                    onChange={(e) => setTicketCode(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-amber-600"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* ROUTE AND TIMING */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
-                  Booking Reference / PNR / Ticket Number (For Verification)
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                  Origin / Departure City *
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. BR-994821 or PNR-582918"
-                  value={ticketCode}
-                  onChange={(e) => setTicketCode(e.target.value)}
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488]"
+                  placeholder="e.g. Dhaka"
+                  value={from}
+                  onChange={(e) => setFrom(e.target.value)}
+                  required
+                  className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-300 rounded-xl outline-none focus:border-teal-600 focus:bg-white"
                 />
-                <span className="text-[11px] text-slate-400 mt-1 block">
-                  Used by our AI to prevent duplicate ticket listings and guarantee uniqueness.
-                </span>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                  Destination / Arrival City *
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Chittagong, Cox's Bazar, Sylhet"
+                  value={to}
+                  onChange={(e) => setTo(e.target.value)}
+                  required
+                  className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-300 rounded-xl outline-none focus:border-teal-600 focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                  Travel Date *
+                </label>
+                <input
+                  type="date"
+                  value={travelDate}
+                  onChange={(e) => setTravelDate(e.target.value)}
+                  required
+                  className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-300 rounded-xl outline-none focus:border-teal-600 focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                  Departure Time *
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 08:30 PM"
+                  value={travelTime}
+                  onChange={(e) => setTravelTime(e.target.value)}
+                  required
+                  className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-300 rounded-xl outline-none focus:border-teal-600 focus:bg-white"
+                />
               </div>
             </div>
 
-            {/* Step 4: Document Upload */}
-            <div className="space-y-4">
-              <h2 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2 border-b border-slate-100 pb-2">
-                <span className="w-5 h-5 rounded-full bg-[#1A1C43] text-white flex items-center justify-center text-[10px]">4</span>
-                <span>Ticket Document Upload (PDF or Image)</span>
-              </h2>
+            {/* PRICING & QUANTITY */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                  Resale Asking Price (BDT ৳) *
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="e.g. 600"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  required
+                  className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-300 rounded-xl outline-none focus:border-teal-600 focus:bg-white font-bold text-teal-700"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Fair pricing prevents fraud and ensures faster buyer match.
+                </span>
+              </div>
 
-              <div className="border-2 border-dashed border-slate-200 hover:border-[#0D9488] rounded-3xl p-6 text-center transition bg-slate-50/50">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                  Available Quantity *
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  required
+                  className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-300 rounded-xl outline-none focus:border-teal-600 focus:bg-white"
+                />
+              </div>
+            </div>
+
+            {/* DESCRIPTION */}
+            <div>
+              <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                Listing Notes / Additional Info (Optional)
+              </label>
+              <textarea
+                rows={2}
+                placeholder="e.g. Original ticket printed, buyer can collect at counter or transfer online."
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-300 rounded-xl outline-none focus:border-teal-600 focus:bg-white"
+              />
+            </div>
+
+            {/* DOCUMENT / TICKET PROOF UPLOAD */}
+            <div className="pt-2 border-t border-slate-100">
+              <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                Upload Ticket Document (PDF or Image) for AI Verification
+              </label>
+              <div className="p-4 border-2 border-dashed border-slate-300 hover:border-teal-500 rounded-2xl bg-slate-50 text-center transition">
                 <input
                   type="file"
                   id="ticket-doc"
-                  accept=".pdf,.png,.jpg,.jpeg,.webp"
+                  accept=".pdf,image/*"
                   onChange={handleFileChange}
                   className="hidden"
                 />
                 <label htmlFor="ticket-doc" className="cursor-pointer space-y-2 block">
-                  <div className="w-12 h-12 rounded-2xl bg-teal-50 text-[#0D9488] flex items-center justify-center mx-auto">
+                  <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center mx-auto">
                     {uploadingFile ? (
-                      <Loader2 size={24} className="animate-spin" />
-                    ) : documentUrl ? (
-                      <CheckCircle2 size={24} className="text-emerald-500" />
+                      <Loader2 size={20} className="animate-spin" />
                     ) : (
-                      <Upload size={24} />
+                      <Upload size={20} />
                     )}
                   </div>
-
                   <div>
-                    <span className="text-xs font-bold text-slate-800 block">
-                      {uploadingFile
-                        ? "Uploading & screening document..."
-                        : selectedFile
-                        ? selectedFile.name
-                        : "Click to upload original e-ticket document"}
+                    <span className="text-xs font-bold text-teal-700 hover:underline">
+                      Click to upload ticket file
                     </span>
-                    <span className="text-[11px] text-slate-400">
-                      Supports PDF, PNG, JPG (Max 10MB)
-                    </span>
+                    <p className="text-[10px] text-slate-400">PDF, JPG, PNG up to 10MB</p>
                   </div>
-
-                  {documentUrl && (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                      <Check size={12} />
-                      <span>Document Uploaded Securely</span>
-                    </span>
-                  )}
                 </label>
 
-                {fileError && (
-                  <p className="text-xs text-red-600 font-semibold mt-2">{fileError}</p>
+                {documentUrl && (
+                  <div className="mt-2 inline-flex items-center gap-1.5 bg-emerald-100 text-emerald-800 text-[11px] font-bold px-3 py-1 rounded-full">
+                    <CheckCircle2 size={13} />
+                    <span>Document uploaded & ready for AI verification</span>
+                  </div>
                 )}
+                {fileError && <p className="text-xs text-rose-600 mt-2">{fileError}</p>}
               </div>
             </div>
+          </div>
 
-            {/* Description / Handover Instructions */}
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">
-                Handover Notes / Additional Instructions
-              </label>
-              <textarea
-                rows={2}
-                placeholder="Specify any boarding notes, station counter pickup, or transfer instructions..."
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488]"
-              />
+          {/* Feedback messages */}
+          {error && (
+            <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-xs text-red-700 font-bold flex items-center gap-2">
+              <AlertCircle size={16} />
+              <span>{error}</span>
             </div>
+          )}
 
-            {/* Submit Button */}
-            <div className="pt-2">
-              <button
-                type="submit"
-                disabled={submitting || uploadingFile}
-                className="w-full py-4 bg-[#0D9488] hover:bg-[#0F766E] text-white font-extrabold rounded-2xl text-sm transition shadow-lg flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-              >
-                {aiAnalyzing ? (
-                  <>
-                    <Loader2 size={18} className="animate-spin" />
-                    <span>Running AI Verification & Duplicate Checks...</span>
-                  </>
-                ) : (
-                  <>
-                    <ShieldCheck size={18} />
-                    <span>Verify & Publish Ticket Listing</span>
-                  </>
-                )}
-              </button>
+          {success && (
+            <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-700 font-bold flex items-center gap-2">
+              <CheckCircle2 size={16} />
+              <span>{success}</span>
             </div>
-          </form>
-        </div>
+          )}
+
+          {/* Submit Button */}
+          <button
+            type="submit"
+            disabled={submitting || uploadingFile}
+            className="w-full py-4 rounded-2xl bg-gradient-to-r from-teal-600 via-emerald-600 to-teal-700 hover:from-teal-500 hover:to-emerald-500 text-white font-black text-sm tracking-wide shadow-xl hover:shadow-2xl transition transform active:scale-98 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+          >
+            {submitting ? (
+              <>
+                <Loader2 size={18} className="animate-spin" />
+                <span>
+                  {aiAnalyzing ? "Running AI Authenticity Verification..." : "Publishing Listing..."}
+                </span>
+              </>
+            ) : (
+              <>
+                <span>Publish Ticket Listing</span>
+                <ArrowRight size={18} />
+              </>
+            )}
+          </button>
+        </form>
       </div>
     </main>
   );

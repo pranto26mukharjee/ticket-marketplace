@@ -17,6 +17,8 @@ export async function GET(request: Request) {
     const from = searchParams.get("from")?.trim();
     const to = searchParams.get("to")?.trim();
     const category = searchParams.get("category")?.trim();
+    const operator = searchParams.get("operator")?.trim();
+    const coachType = searchParams.get("coachType")?.trim();
     const sort = searchParams.get("sort") || "newest";
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
     const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") || "12", 10)));
@@ -49,12 +51,28 @@ export async function GET(request: Request) {
       };
     }
 
+    if (operator) {
+      where.operatorName = {
+        contains: operator,
+        mode: "insensitive",
+      };
+    }
+
+    if (coachType) {
+      where.coachType = {
+        contains: coachType,
+        mode: "insensitive",
+      };
+    }
+
     if (search) {
       where.OR = [
         { title: { contains: search, mode: "insensitive" } },
         { from: { contains: search, mode: "insensitive" } },
         { to: { contains: search, mode: "insensitive" } },
         { description: { contains: search, mode: "insensitive" } },
+        { operatorName: { contains: search, mode: "insensitive" } },
+        { coachType: { contains: search, mode: "insensitive" } },
       ];
     }
 
@@ -79,6 +97,8 @@ export async function GET(request: Request) {
             select: {
               id: true,
               fullName: true,
+              email: true,
+              phone: true,
             },
           },
           verifications: {
@@ -127,7 +147,8 @@ export async function GET(request: Request) {
 |--------------------------------------------------------------------------
 | POST /api/tickets
 |--------------------------------------------------------------------------
-| Create a new ticket listing with AI verification and duplicate screening.
+| Create a new ticket listing with specialized metadata, AI verification,
+| and duplicate screening.
 */
 export async function POST(request: Request) {
   try {
@@ -159,6 +180,11 @@ export async function POST(request: Request) {
       quantity,
       ticketCode,
       documentUrl,
+      operatorName,
+      coachType,
+      boardingPoint,
+      droppingPoint,
+      bogeyNumber,
     } = body;
 
     // Required field validation
@@ -214,7 +240,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 1. Run Duplicate Ticket Check (Rule 11)
+    // 1. Run Duplicate Ticket Check
     const duplicateCheck = await checkDuplicateTicket({
       from,
       to,
@@ -233,7 +259,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Run AI & Rule Verification (Rule 10)
+    // 2. Run AI & Rule Verification
     const aiVerification = await verifyTicketWithAI({
       title,
       category,
@@ -271,6 +297,11 @@ export async function POST(request: Request) {
         quantity: ticketQuantity,
         ticketCode: ticketCode ? ticketCode.trim() : null,
         ticketStatus: initialStatus,
+        operatorName: operatorName ? operatorName.trim() : null,
+        coachType: coachType ? coachType.trim() : null,
+        boardingPoint: boardingPoint ? boardingPoint.trim() : null,
+        droppingPoint: droppingPoint ? droppingPoint.trim() : null,
+        bogeyNumber: bogeyNumber ? bogeyNumber.trim() : null,
         seller: {
           connect: {
             id: session.userId,

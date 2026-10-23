@@ -10,8 +10,6 @@ import {
   ArrowRight,
   Loader2,
   Search,
-  Filter,
-  SlidersHorizontal,
   ArrowUpDown,
   ShieldCheck,
   Heart,
@@ -23,11 +21,11 @@ import {
   Bus,
   Train,
   Plane,
-  Film,
   Music,
-  Ship,
   Armchair,
   Tag,
+  MessageSquare,
+  Building,
 } from "lucide-react";
 
 interface TicketData {
@@ -43,12 +41,18 @@ interface TicketData {
   price: number | null;
   quantity: number;
   ticketStatus: string;
+  operatorName?: string | null;
+  coachType?: string | null;
+  boardingPoint?: string | null;
+  droppingPoint?: string | null;
+  bogeyNumber?: string | null;
   category?: {
     categoryName: string;
   } | null;
   seller?: {
     id: string;
     fullName: string | null;
+    email?: string | null;
   } | null;
   verifications?: Array<{
     verificationStatus: string;
@@ -66,13 +70,19 @@ interface PaginationInfo {
 }
 
 const CATEGORIES = [
-  { id: "ALL", label: "All Categories", icon: Ticket },
-  { id: "TRAIN", label: "Train", icon: Train },
-  { id: "BUS", label: "Bus", icon: Bus },
-  { id: "FLIGHT", label: "Air Flight", icon: Plane },
-  { id: "LAUNCH", label: "Launch / Ship", icon: Ship },
-  { id: "CONCERT", label: "Concert", icon: Music },
-  { id: "MOVIE", label: "Movie", icon: Film },
+  { id: "ALL", label: "All Tickets", icon: Ticket },
+  { id: "TRAIN", label: "Train Tickets", icon: Train },
+  { id: "BUS", label: "Bus Tickets", icon: Bus },
+  { id: "FLIGHT", label: "Air Flights", icon: Plane },
+  { id: "EVENT", label: "Concerts & Events", icon: Music },
+];
+
+const POPULAR_ROUTES = [
+  { from: "Dhaka", to: "Chittagong", label: "Dhaka ➔ Chittagong" },
+  { from: "Dhaka", to: "Cox's Bazar", label: "Dhaka ➔ Cox's Bazar" },
+  { from: "Dhaka", to: "Sylhet", label: "Dhaka ➔ Sylhet" },
+  { from: "Dhaka", to: "Rajshahi", label: "Dhaka ➔ Rajshahi" },
+  { from: "Dhaka", to: "Khulna", label: "Dhaka ➔ Khulna" },
 ];
 
 function formatCategory(category: unknown, fallback = "TRAVEL"): string {
@@ -98,12 +108,11 @@ function MarketplaceContent() {
   const currentSort = searchParams.get("sort") || "newest";
   const currentPage = parseInt(searchParams.get("page") || "1", 10);
 
-  // Local state for inputs
-  const [searchInput, setSearchInput] = useState(currentSearch);
+  // Local state
   const [fromInput, setFromInput] = useState(currentFrom);
   const [toInput, setToInput] = useState(currentTo);
+  const [searchInput, setSearchInput] = useState(currentSearch);
 
-  // Data states
   const [tickets, setTickets] = useState<TicketData[]>([]);
   const [pagination, setPagination] = useState<PaginationInfo>({
     totalCount: 0,
@@ -119,18 +128,31 @@ function MarketplaceContent() {
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [togglingFavorite, setTogglingFavorite] = useState<string | null>(null);
 
-  // Sync inputs if URL params change externally
+  // Sync inputs if URL parameters change
   useEffect(() => {
-    setSearchInput(currentSearch);
     setFromInput(currentFrom);
     setToInput(currentTo);
-  }, [currentSearch, currentFrom, currentTo]);
+    setSearchInput(currentSearch);
+  }, [currentFrom, currentTo, currentSearch]);
 
-  // Load tickets based on current URL query params
+  // Fetch Wishlist/Favorites
   useEffect(() => {
-    let isMounted = true;
+    fetch("/api/favorites")
+      .then((res) => {
+        if (!res.ok) throw new Error();
+        return res.json();
+      })
+      .then((data) => {
+        if (data.success && Array.isArray(data.favorites)) {
+          setFavoriteIds(new Set(data.favorites.map((f: { ticketId: string }) => f.ticketId)));
+        }
+      })
+      .catch(() => {});
+  }, []);
 
-    async function fetchTickets() {
+  // Fetch Tickets matching URL filters
+  useEffect(() => {
+    async function loadTickets() {
       setLoading(true);
       setError("");
 
@@ -141,54 +163,31 @@ function MarketplaceContent() {
         if (currentTo) query.set("to", currentTo);
         if (currentSearch) query.set("search", currentSearch);
         if (currentSort) query.set("sort", currentSort);
-        query.set("page", currentPage.toString());
-        query.set("limit", "12");
+        if (currentPage) query.set("page", currentPage.toString());
 
         const res = await fetch(`/api/tickets?${query.toString()}`);
         const data = await res.json();
 
-        if (!res.ok) {
+        if (!res.ok || !data.success) {
           throw new Error(data.message || "Failed to load marketplace tickets.");
         }
 
-        if (isMounted) {
-          setTickets(data.tickets || []);
-          if (data.pagination) setPagination(data.pagination);
-        }
+        setTickets(data.tickets || []);
+        if (data.pagination) setPagination(data.pagination);
       } catch (err: unknown) {
-        if (isMounted) {
-          setError(err instanceof Error ? err.message : "Something went wrong loading tickets.");
-        }
+        setError(err instanceof Error ? err.message : "Network error");
       } finally {
-        if (isMounted) setLoading(false);
+        setLoading(false);
       }
     }
 
-    fetchTickets();
-
-    // Fetch user favorites to show filled heart icons
-    fetch("/api/favorites")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.favorites && isMounted) {
-          const ids = new Set<string>(
-            data.favorites.map((fav: { ticketId: string }) => fav.ticketId)
-          );
-          setFavoriteIds(ids);
-        }
-      })
-      .catch(() => {});
-
-    return () => {
-      isMounted = false;
-    };
+    loadTickets();
   }, [currentCategory, currentFrom, currentTo, currentSearch, currentSort, currentPage]);
 
-  // Helper to push updated URL query params
-  function updateFilters(updates: Record<string, string | number | null>) {
+  function updateFilters(newParams: Record<string, string | number | null>) {
     const params = new URLSearchParams(searchParams.toString());
 
-    Object.entries(updates).forEach(([key, val]) => {
+    Object.entries(newParams).forEach(([key, val]) => {
       if (val === null || val === "" || val === "ALL") {
         params.delete(key);
       } else {
@@ -196,8 +195,7 @@ function MarketplaceContent() {
       }
     });
 
-    // Reset to page 1 whenever filters change (unless updating page itself)
-    if (!updates.page) {
+    if (!newParams.page) {
       params.delete("page");
     }
 
@@ -206,48 +204,53 @@ function MarketplaceContent() {
     });
   }
 
-  // Handle Search Submission
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
     updateFilters({
-      search: searchInput.trim() || null,
-      from: fromInput.trim() || null,
-      to: toInput.trim() || null,
+      from: fromInput.trim(),
+      to: toInput.trim(),
+      search: searchInput.trim(),
+      page: 1,
     });
   }
 
-  // Toggle favorite
   async function handleToggleFavorite(ticketId: string, e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
 
-    try {
-      setTogglingFavorite(ticketId);
-      const res = await fetch("/api/favorites", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticketId }),
-      });
+    if (togglingFavorite) return;
+    setTogglingFavorite(ticketId);
 
-      const data = await res.json();
-      if (res.ok) {
-        setFavoriteIds((prev) => {
-          const next = new Set(prev);
-          if (data.isFavorited) next.add(ticketId);
-          else next.delete(ticketId);
-          return next;
-        });
-      } else if (res.status === 401) {
-        router.push("/login?redirect=/tickets");
+    try {
+      const isFav = favoriteIds.has(ticketId);
+      const method = isFav ? "DELETE" : "POST";
+      const url = isFav ? `/api/favorites?ticketId=${ticketId}` : "/api/favorites";
+      const options: RequestInit = { method };
+
+      if (!isFav) {
+        options.headers = { "Content-Type": "application/json" };
+        options.body = JSON.stringify({ ticketId });
       }
+
+      const res = await fetch(url, options);
+      if (res.status === 401) {
+        router.push("/login?redirect=/tickets");
+        return;
+      }
+
+      setFavoriteIds((prev) => {
+        const next = new Set(prev);
+        if (isFav) next.delete(ticketId);
+        else next.add(ticketId);
+        return next;
+      });
     } catch (err) {
-      console.error("Favorite toggle failed", err);
+      console.error("Favorite toggle failed:", err);
     } finally {
       setTogglingFavorite(null);
     }
   }
 
-  // Helper to format date
   function formatTravelDate(dateString: string | null) {
     if (!dateString) return "Date not specified";
     try {
@@ -262,7 +265,7 @@ function MarketplaceContent() {
   }
 
   return (
-    <main className="min-h-screen bg-[#F8FAFC] text-slate-800 pb-16">
+    <main className="min-h-screen bg-[#F8FAFC] text-slate-800 pb-16 font-sans">
       {/* Search Header Banner */}
       <section className="bg-[#1A1C43] text-white pt-10 pb-16 px-4 md:px-8 border-b border-slate-700/60 shadow-inner">
         <div className="max-w-7xl mx-auto space-y-6">
@@ -270,20 +273,20 @@ function MarketplaceContent() {
             <div>
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#5EEAD4]/10 text-[#5EEAD4] text-xs font-semibold border border-[#5EEAD4]/20 mb-2">
                 <Sparkles size={14} />
-                <span>Verified Secondary Ticket Exchange</span>
+                <span>AI Verified Secondary Ticket Exchange</span>
               </div>
-              <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">
-                Browse Available Tickets
+              <h1 className="text-3xl md:text-4xl font-black tracking-tight">
+                Browse Verified Tickets
               </h1>
               <p className="text-slate-300 text-sm mt-1">
-                Authentic P2P tickets with AI verification and 100% Escrow buyer protection.
+                Authentic P2P tickets for Bus, Train, Flight & Events with 100% Escrow Buyer Protection.
               </p>
             </div>
 
             <div className="text-right hidden md:block">
               <span className="text-xs text-slate-400 block">Total Active Listings</span>
               <span className="text-2xl font-black text-[#5EEAD4]">
-                {pagination.totalCount} Tickets
+                {pagination.totalCount} Tickets Available
               </span>
             </div>
           </div>
@@ -297,12 +300,12 @@ function MarketplaceContent() {
             <div className="flex items-center gap-3 border border-slate-200 rounded-xl px-3.5 py-2.5 bg-slate-50 focus-within:bg-white focus-within:border-[#0D9488] transition">
               <MapPin size={18} className="text-[#0D9488] shrink-0" />
               <div className="w-full text-left">
-                <label className="text-[10px] text-slate-400 font-semibold block uppercase tracking-wider">
+                <label className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">
                   From
                 </label>
                 <input
                   type="text"
-                  placeholder="Dhaka, Sylhet..."
+                  placeholder="Dhaka, Sylhet, etc."
                   value={fromInput}
                   onChange={(e) => setFromInput(e.target.value)}
                   className="w-full text-xs font-semibold text-slate-800 bg-transparent outline-none placeholder:text-slate-400"
@@ -314,7 +317,7 @@ function MarketplaceContent() {
             <div className="flex items-center gap-3 border border-slate-200 rounded-xl px-3.5 py-2.5 bg-slate-50 focus-within:bg-white focus-within:border-[#0D9488] transition">
               <MapPin size={18} className="text-[#0D9488] shrink-0" />
               <div className="w-full text-left">
-                <label className="text-[10px] text-slate-400 font-semibold block uppercase tracking-wider">
+                <label className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">
                   To
                 </label>
                 <input
@@ -327,16 +330,16 @@ function MarketplaceContent() {
               </div>
             </div>
 
-            {/* Keyword Search */}
+            {/* Keyword / Operator Search */}
             <div className="flex items-center gap-3 border border-slate-200 rounded-xl px-3.5 py-2.5 bg-slate-50 focus-within:bg-white focus-within:border-[#0D9488] transition">
               <Search size={18} className="text-[#0D9488] shrink-0" />
               <div className="w-full text-left">
-                <label className="text-[10px] text-slate-400 font-semibold block uppercase tracking-wider">
-                  Keywords / Operator
+                <label className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">
+                  Operator / Train / Venue
                 </label>
                 <input
                   type="text"
-                  placeholder="Subarna, Green Line, Concert..."
+                  placeholder="Green Line, Sonar Bangla..."
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   className="w-full text-xs font-semibold text-slate-800 bg-transparent outline-none placeholder:text-slate-400"
@@ -347,12 +350,33 @@ function MarketplaceContent() {
             {/* Submit Button */}
             <button
               type="submit"
-              className="w-full bg-[#0D9488] hover:bg-[#0F766E] text-white font-bold rounded-xl px-5 py-3 transition shadow-md flex items-center justify-center gap-2 text-sm cursor-pointer"
+              className="w-full bg-[#0D9488] hover:bg-[#0F766E] text-white font-bold rounded-xl px-5 py-3 transition shadow-md flex items-center justify-center gap-2 text-xs cursor-pointer"
             >
               <Search size={16} />
-              <span>Filter Tickets</span>
+              <span>Search Tickets</span>
             </button>
           </form>
+
+          {/* Quick Route Shortcuts */}
+          <div className="flex items-center gap-2 overflow-x-auto text-xs pt-1">
+            <span className="text-slate-400 text-[11px] font-semibold whitespace-nowrap hidden sm:inline">
+              Popular Routes:
+            </span>
+            {POPULAR_ROUTES.map((route, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => {
+                  setFromInput(route.from);
+                  setToInput(route.to);
+                  updateFilters({ from: route.from, to: route.to, page: 1 });
+                }}
+                className="px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 text-slate-200 text-[11px] font-medium border border-white/10 whitespace-nowrap transition cursor-pointer"
+              >
+                {route.label}
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -371,11 +395,11 @@ function MarketplaceContent() {
                   onClick={() => updateFilters({ category: cat.id })}
                   className={`px-3.5 py-2 rounded-xl text-xs font-bold shrink-0 flex items-center gap-2 transition cursor-pointer ${
                     isActive
-                      ? "bg-[#0D9488] text-white shadow-sm"
+                      ? "bg-[#0D9488] text-white shadow-md shadow-teal-500/20"
                       : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                   }`}
                 >
-                  <Icon size={14} />
+                  <Icon size={15} />
                   <span>{cat.label}</span>
                 </button>
               );
@@ -384,7 +408,7 @@ function MarketplaceContent() {
 
           {/* Sort Selector */}
           <div className="flex items-center gap-3 w-full lg:w-auto justify-end">
-            <span className="text-xs text-slate-400 font-medium hidden sm:inline">Sort By:</span>
+            <span className="text-xs text-slate-400 font-medium hidden sm:inline">Sort:</span>
             <div className="relative">
               <select
                 value={currentSort}
@@ -398,55 +422,17 @@ function MarketplaceContent() {
               </select>
               <ArrowUpDown
                 size={14}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                className="text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
               />
             </div>
           </div>
         </div>
 
-        {/* Applied Filters Display */}
-        {(currentFrom || currentTo || currentSearch || currentCategory !== "ALL") && (
-          <div className="flex items-center gap-2 flex-wrap text-xs text-slate-500">
-            <span className="font-semibold text-slate-700">Active filters:</span>
-            {currentCategory !== "ALL" && (
-              <span className="bg-teal-50 text-teal-700 border border-teal-200 px-2.5 py-1 rounded-full flex items-center gap-1">
-                Category: {currentCategory}
-              </span>
-            )}
-            {currentFrom && (
-              <span className="bg-slate-100 text-slate-700 border border-slate-200 px-2.5 py-1 rounded-full">
-                From: {currentFrom}
-              </span>
-            )}
-            {currentTo && (
-              <span className="bg-slate-100 text-slate-700 border border-slate-200 px-2.5 py-1 rounded-full">
-                To: {currentTo}
-              </span>
-            )}
-            {currentSearch && (
-              <span className="bg-slate-100 text-slate-700 border border-slate-200 px-2.5 py-1 rounded-full">
-                Search: &quot;{currentSearch}&quot;
-              </span>
-            )}
-            <button
-              onClick={() => {
-                setSearchInput("");
-                setFromInput("");
-                setToInput("");
-                router.push("/tickets");
-              }}
-              className="text-[#0D9488] font-bold hover:underline ml-2 cursor-pointer"
-            >
-              Clear All Filters
-            </button>
-          </div>
-        )}
-
         {/* Loading State */}
         {loading && (
-          <div className="py-24 flex flex-col items-center justify-center gap-4 bg-white rounded-3xl border border-slate-100 shadow-sm">
-            <Loader2 size={36} className="animate-spin text-[#0D9488]" />
-            <p className="text-sm font-semibold text-slate-500">
+          <div className="py-20 text-center space-y-3">
+            <Loader2 size={36} className="animate-spin text-[#0D9488] mx-auto" />
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
               Fetching verified marketplace tickets...
             </p>
           </div>
@@ -501,6 +487,19 @@ function MarketplaceContent() {
               const isPendingFav = togglingFavorite === t.id;
               const isVerified = t.verifications?.[0]?.verificationStatus === "VERIFIED";
 
+              // Category styling badge
+              const categoryStr = formatCategory(t.category, t.ticketType || "TRAVEL").toUpperCase();
+              let badgeColor = "bg-teal-50 text-[#0D9488] border-teal-200/60";
+              if (categoryStr.includes("TRAIN")) {
+                badgeColor = "bg-indigo-50 text-indigo-700 border-indigo-200";
+              } else if (categoryStr.includes("BUS")) {
+                badgeColor = "bg-teal-50 text-teal-800 border-teal-200";
+              } else if (categoryStr.includes("FLIGHT")) {
+                badgeColor = "bg-sky-50 text-sky-800 border-sky-200";
+              } else if (categoryStr.includes("EVENT") || categoryStr.includes("CONCERT")) {
+                badgeColor = "bg-amber-50 text-amber-800 border-amber-200";
+              }
+
               return (
                 <div
                   key={t.id}
@@ -510,8 +509,8 @@ function MarketplaceContent() {
                   <div className="p-5 pb-4 border-b border-slate-100 flex items-start justify-between gap-3">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-teal-50 text-[#0D9488] border border-teal-200/60">
-                          {formatCategory(t.category, t.ticketType || "TRAVEL")}
+                        <span className={`text-[11px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${badgeColor}`}>
+                          {categoryStr}
                         </span>
                         {isVerified ? (
                           <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
@@ -524,9 +523,14 @@ function MarketplaceContent() {
                           </span>
                         )}
                       </div>
-                      <h3 className="font-bold text-slate-900 text-base group-hover:text-[#0D9488] transition line-clamp-1">
+                      <h3 className="font-extrabold text-slate-900 text-base group-hover:text-[#0D9488] transition line-clamp-1">
                         {t.title}
                       </h3>
+                      {t.operatorName && (
+                        <p className="text-[11px] font-bold text-slate-500">
+                          {t.operatorName}
+                        </p>
+                      )}
                     </div>
 
                     {/* Favorite Button */}
@@ -551,18 +555,18 @@ function MarketplaceContent() {
                   <div className="p-5 space-y-4 text-xs text-slate-600">
                     {/* Origin / Destination Box */}
                     <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100 space-y-2">
-                      <div className="flex items-center justify-between font-bold text-slate-800 text-sm">
+                      <div className="flex items-center justify-between font-black text-slate-800 text-sm">
                         <span>{t.from || "Anywhere"}</span>
                         <ArrowRight size={14} className="text-[#0D9488]" />
                         <span>{t.to || "Destination"}</span>
                       </div>
                       <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-200/60">
-                        <span className="flex items-center gap-1">
+                        <span className="flex items-center gap-1 font-medium">
                           <Calendar size={12} className="text-slate-500" />
                           <span>{formatTravelDate(t.travelDate)}</span>
                         </span>
                         {t.travelTime && (
-                          <span className="flex items-center gap-1 font-medium text-slate-600">
+                          <span className="flex items-center gap-1 font-bold text-slate-700">
                             <Clock size={12} className="text-slate-400" />
                             <span>{t.travelTime}</span>
                           </span>
@@ -572,58 +576,73 @@ function MarketplaceContent() {
 
                     {/* Seat & Class Details */}
                     <div className="grid grid-cols-2 gap-2 text-[11px]">
-                      <div className="bg-slate-50/80 p-2 rounded-xl flex items-center gap-2">
-                        <Armchair size={14} className="text-slate-400" />
-                        <div>
-                          <span className="text-slate-400 block text-[10px]">Seat/Seat Class</span>
-                          <span className="font-semibold text-slate-800">
-                            {t.seatNumber || "General"}
+                      <div className="bg-slate-50/80 p-2.5 rounded-xl flex items-center gap-2 border border-slate-100">
+                        <Armchair size={15} className="text-[#0D9488] shrink-0" />
+                        <div className="truncate">
+                          <span className="text-slate-400 block text-[9px] uppercase font-bold">
+                            {t.bogeyNumber ? `Bogey ${t.bogeyNumber}` : "Seat"}
+                          </span>
+                          <span className="font-bold text-slate-800 truncate block">
+                            {t.seatNumber || "General Admission"}
                           </span>
                         </div>
                       </div>
-                      <div className="bg-slate-50/80 p-2 rounded-xl flex items-center gap-2">
-                        <Tag size={14} className="text-slate-400" />
-                        <div>
-                          <span className="text-slate-400 block text-[10px]">Stock Left</span>
-                          <span className="font-semibold text-slate-800">
-                            {t.quantity} ticket{t.quantity > 1 ? "s" : ""}
+
+                      <div className="bg-slate-50/80 p-2.5 rounded-xl flex items-center gap-2 border border-slate-100">
+                        <Tag size={15} className="text-[#0D9488] shrink-0" />
+                        <div className="truncate">
+                          <span className="text-slate-400 block text-[9px] uppercase font-bold">Class / Type</span>
+                          <span className="font-bold text-slate-800 truncate block">
+                            {t.coachType || t.ticketType || "Standard"}
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Seller details */}
+                    {/* Seller details & Escrow Protection */}
                     <div className="flex items-center justify-between text-[11px] pt-1">
-                      <span className="text-slate-400">
+                      <span className="text-slate-500">
                         Seller:{" "}
-                        <strong className="text-slate-700">
+                        <strong className="text-slate-800">
                           {t.seller?.fullName || "Verified Seller"}
                         </strong>
                       </span>
-                      <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md">
-                        Escrow Protected
+                      <span className="text-emerald-700 font-bold bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-md">
+                        Escrow Safe
                       </span>
                     </div>
                   </div>
 
                   {/* Card Footer / Price & Action */}
-                  <div className="p-5 pt-3 bg-slate-50/60 border-t border-slate-100 flex items-center justify-between">
+                  <div className="p-4 sm:p-5 pt-3 bg-slate-50/60 border-t border-slate-100 flex items-center justify-between gap-2">
                     <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-bold block">
-                        Price
+                      <span className="text-[10px] text-slate-400 uppercase font-black block">
+                        Asking Price
                       </span>
-                      <span className="text-xl font-extrabold text-[#0D9488]">
+                      <span className="text-xl font-black text-[#0D9488]">
                         ৳{t.price?.toLocaleString() || "0"}
                       </span>
                     </div>
 
-                    <Link
-                      href={`/tickets/${t.id}`}
-                      className="px-4 py-2.5 bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-bold rounded-xl transition shadow flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <span>View Details</span>
-                      <ArrowRight size={14} />
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      {/* Direct Message with Seller Button */}
+                      <Link
+                        href={`/messages?ticketId=${t.id}&sellerId=${t.seller?.id || ""}`}
+                        title="Direct Chat with Seller"
+                        className="p-2.5 rounded-xl border border-slate-200 bg-white hover:bg-teal-50 hover:border-teal-400 text-teal-700 transition flex items-center justify-center shadow-2xs"
+                      >
+                        <MessageSquare size={16} />
+                      </Link>
+
+                      {/* View Details Button */}
+                      <Link
+                        href={`/tickets/${t.id}`}
+                        className="px-4 py-2.5 bg-[#0D9488] hover:bg-[#0F766E] text-white text-xs font-extrabold rounded-xl transition shadow-md flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <span>View</span>
+                        <ArrowRight size={14} />
+                      </Link>
+                    </div>
                   </div>
                 </div>
               );
@@ -665,12 +684,12 @@ function MarketplaceContent() {
   );
 }
 
-export default function TicketsPage() {
+export default function MarketplacePage() {
   return (
     <Suspense
       fallback={
         <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center">
-          <Loader2 size={36} className="animate-spin text-[#0D9488]" />
+          <Loader2 size={32} className="animate-spin text-[#0D9488]" />
         </div>
       }
     >

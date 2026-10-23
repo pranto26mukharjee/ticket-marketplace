@@ -27,6 +27,7 @@ import {
   ChevronRight,
   Play,
   Film,
+  MessageSquare,
 } from "lucide-react";
 
 const CATEGORIES = [
@@ -114,6 +115,15 @@ const TRUST_FEATURES = [
     color: "text-purple-600",
     bg: "bg-purple-50",
     border: "border-purple-200",
+  },
+  {
+    icon: MessageSquare,
+    title: "Direct Buyer-Seller Chat",
+    description: "Connect directly with verified sellers or buyers. Negotiate, confirm seat numbers, and arrange handover in real-time.",
+    badge: "In-App Messaging",
+    color: "text-teal-600",
+    bg: "bg-teal-50",
+    border: "border-teal-200",
   },
   {
     icon: Zap,

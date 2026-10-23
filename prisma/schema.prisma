@@ -33,6 +33,9 @@ model User {
   fraudAlerts    FraudAlert[]         @relation("FraudRelatedUser")
   resolvedAlerts FraudAlert[]         @relation("ResolvedAlerts")
   favorites      Favorite[]
+  buyerConversations  Conversation[]  @relation("BuyerConversations")
+  sellerConversations Conversation[] @relation("SellerConversations")
+  sentMessages        ChatMessage[]   @relation("SentChatMessages")
 }
 
 model Role {
@@ -112,6 +115,13 @@ model Ticket {
   originalPrice Float?
   ticketStatus  String  @default("AVAILABLE") // AVAILABLE, SOLD, CANCELLED
 
+  // Specialized metadata for Bus, Train, Flight, Event
+  operatorName  String? // Bus Operator / Airline / Event Organizer
+  coachType     String? // AC Deluxe / Non-AC / Snigdha / Shovon / Economy / VIP
+  boardingPoint String? // Boarding station / Terminal / Gate
+  droppingPoint String? // Dropping station / Destination airport
+  bogeyNumber   String? // Train coach number or Event Zone
+
   seller   User            @relation("UserTickets", fields: [sellerId], references: [id])
   category TicketCategory? @relation(fields: [categoryId], references: [id])
   event    Event?          @relation(fields: [eventId], references: [id])
@@ -122,6 +132,7 @@ model Ticket {
   fraudAlerts   FraudAlert[]
   orders        Order[] // Legacy compatibility
   favorites     Favorite[]
+  conversations Conversation[]
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -293,4 +304,37 @@ model Favorite {
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@unique([userId, ticketId])
+}
+
+model Conversation {
+  id        String        @id @default(cuid())
+  ticketId  String?
+  buyerId   String
+  sellerId  String
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  ticket    Ticket?       @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  buyer     User          @relation("BuyerConversations", fields: [buyerId], references: [id], onDelete: Cascade)
+  seller    User          @relation("SellerConversations", fields: [sellerId], references: [id], onDelete: Cascade)
+  messages  ChatMessage[]
+
+  @@unique([ticketId, buyerId, sellerId])
+  @@index([buyerId])
+  @@index([sellerId])
+}
+
+model ChatMessage {
+  id             String       @id @default(cuid())
+  conversationId String
+  senderId       String
+  content        String
+  isRead         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation("SentChatMessages", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([senderId])
 }

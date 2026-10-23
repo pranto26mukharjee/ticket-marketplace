@@ -18,7 +18,6 @@ import {
   X,
   MessageSquare,
   Package,
-  HelpCircle,
   Sparkles,
 } from "lucide-react";
 import NotificationDropdown from "@/components/NotificationDropdown";
@@ -175,7 +174,7 @@ export default function Navbar() {
             }`}
           >
             <ShieldCheck size={14} className="text-teal-400" />
-            <span>How Escrow Works</span>
+            <span>Escrow Security</span>
           </Link>
 
           {/* Sell Ticket Link / Button */}
@@ -189,9 +188,22 @@ export default function Navbar() {
         </nav>
 
         {/* Right Section: Actions & Profile */}
-        <div className="flex items-center gap-3 sm:gap-4">
+        <div className="flex items-center gap-2.5 sm:gap-3">
           {user ? (
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3">
+              {/* Direct Messages Icon Button */}
+              <Link
+                href="/messages"
+                title="Direct Buyer-Seller Messages"
+                className={`w-9 h-9 rounded-xl flex items-center justify-center transition border ${
+                  pathname.startsWith("/messages")
+                    ? "bg-teal-500/20 text-[#5EEAD4] border-teal-500/50"
+                    : "bg-slate-800/80 hover:bg-slate-700 border-slate-700/60 text-slate-300 hover:text-teal-300"
+                }`}
+              >
+                <MessageSquare size={16} />
+              </Link>
+
               {/* Favorites Heart Icon */}
               <Link
                 href="/dashboard?tab=favorites"
@@ -204,14 +216,14 @@ export default function Navbar() {
               {/* Interactive Notification Popover */}
               <NotificationDropdown />
 
-              {/* Admin Portal Quick Button (if Admin) */}
+              {/* Dedicated Admin Portal Quick Button (if Admin) */}
               {user.role === "ADMIN" && (
                 <Link
                   href="/admin"
-                  className="hidden sm:flex items-center gap-1 text-[11px] font-bold bg-purple-600 hover:bg-purple-500 text-white px-2.5 py-1.5 rounded-lg transition shadow-sm"
+                  className="flex items-center gap-1 text-[11px] font-bold bg-purple-600 hover:bg-purple-500 text-white px-2.5 py-1.5 rounded-lg transition shadow-sm"
                 >
                   <ShieldCheck size={13} />
-                  <span>Admin</span>
+                  <span>Admin Page</span>
                 </Link>
               )}
 
@@ -243,7 +255,7 @@ export default function Navbar() {
 
                 {/* Dropdown Menu Modal */}
                 {userMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden text-slate-800 animate-in fade-in slide-in-from-top-2 duration-150 z-50">
+                  <div className="absolute right-0 mt-2 w-60 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden text-slate-800 animate-in fade-in slide-in-from-top-2 duration-150 z-50">
                     {/* Header info */}
                     <div className="p-3.5 bg-slate-50 border-b border-slate-100">
                       <p className="text-xs font-bold text-slate-900 truncate">
@@ -265,9 +277,18 @@ export default function Navbar() {
                           className="flex items-center gap-2 px-3 py-2 rounded-lg text-purple-700 bg-purple-50 hover:bg-purple-100 font-bold"
                         >
                           <ShieldCheck size={14} className="text-purple-600" />
-                          <span>Admin Command Center</span>
+                          <span>Dedicated Admin Panel</span>
                         </Link>
                       )}
+
+                      <Link
+                        href="/messages"
+                        onClick={() => setUserMenuOpen(false)}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-teal-700 bg-teal-50/60 hover:bg-teal-100/70 font-bold"
+                      >
+                        <MessageSquare size={14} className="text-teal-600" />
+                        <span>Direct Chat & Messages</span>
+                      </Link>
 
                       <Link
                         href="/dashboard"
@@ -303,15 +324,6 @@ export default function Navbar() {
                       >
                         <Ticket size={14} className="text-slate-400" />
                         <span>My Listed Tickets</span>
-                      </Link>
-
-                      <Link
-                        href="/dashboard?tab=inquiries"
-                        onClick={() => setUserMenuOpen(false)}
-                        className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 text-slate-700"
-                      >
-                        <MessageSquare size={14} className="text-slate-400" />
-                        <span>Buyer Inquiries</span>
                       </Link>
 
                       <Link
@@ -410,13 +422,23 @@ export default function Navbar() {
             >
               Browse Verified Tickets
             </Link>
+            {user && (
+              <Link
+                href="/messages"
+                onClick={() => setMobileMenuOpen(false)}
+                className="block px-3 py-2 rounded-lg bg-teal-500/10 text-teal-300 border border-teal-500/20 flex items-center gap-2"
+              >
+                <MessageSquare size={16} />
+                <span>Direct Chat Messages</span>
+              </Link>
+            )}
             <Link
               href="/verification-result"
               onClick={() => setMobileMenuOpen(false)}
               className="block px-3 py-2 rounded-lg hover:bg-slate-800 text-teal-300 flex items-center gap-1.5"
             >
               <ShieldCheck size={16} />
-              How Escrow Works
+              <span>Escrow Security</span>
             </Link>
             <Link
               href="/create-listing"
@@ -424,7 +446,7 @@ export default function Navbar() {
               className="block px-3 py-2 rounded-lg bg-teal-500/20 text-[#5EEAD4] border border-teal-500/30 flex items-center gap-2"
             >
               <PlusCircle size={16} />
-              Sell a Ticket Now
+              <span>Sell a Ticket Now</span>
             </Link>
           </div>
 
@@ -442,9 +464,9 @@ export default function Navbar() {
                   <Link
                     href="/admin"
                     onClick={() => setMobileMenuOpen(false)}
-                    className="text-xs bg-purple-600 px-2 py-1 rounded font-bold"
+                    className="text-xs bg-purple-600 text-white px-2.5 py-1 rounded-lg font-bold"
                   >
-                    Admin
+                    Admin Panel
                   </Link>
                 )}
               </div>
@@ -456,6 +478,13 @@ export default function Navbar() {
                   className="p-2.5 bg-slate-800/80 rounded-lg text-center text-slate-200"
                 >
                   Dashboard
+                </Link>
+                <Link
+                  href="/messages"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="p-2.5 bg-slate-800/80 rounded-lg text-center text-teal-300 font-bold"
+                >
+                  Messages
                 </Link>
                 <Link
                   href="/dashboard?tab=purchases"
@@ -470,13 +499,6 @@ export default function Navbar() {
                   className="p-2.5 bg-slate-800/80 rounded-lg text-center text-slate-200"
                 >
                   My Listings
-                </Link>
-                <Link
-                  href="/dashboard?tab=inquiries"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="p-2.5 bg-slate-800/80 rounded-lg text-center text-slate-200"
-                >
-                  Inquiries
                 </Link>
               </div>
 
