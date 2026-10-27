@@ -10,8 +10,6 @@ import {
   ArrowRight,
   Loader2,
   Search,
-  Filter,
-  SlidersHorizontal,
   ArrowUpDown,
   ShieldCheck,
   Heart,
@@ -40,6 +38,7 @@ interface TicketData {
   travelTime: string | null;
   seatNumber: string | null;
   ticketType: string | null;
+  listingDetails?: Record<string, string> | null;
   price: number | null;
   quantity: number;
   ticketStatus: string;
@@ -72,6 +71,7 @@ const CATEGORIES = [
   { id: "FLIGHT", label: "Air Flight", icon: Plane },
   { id: "LAUNCH", label: "Launch / Ship", icon: Ship },
   { id: "CONCERT", label: "Concert", icon: Music },
+  { id: "MUSIC", label: "Music Festival", icon: Music },
   { id: "MOVIE", label: "Movie", icon: Film },
 ];
 
@@ -121,9 +121,11 @@ function MarketplaceContent() {
 
   // Sync inputs if URL params change externally
   useEffect(() => {
-    setSearchInput(currentSearch);
-    setFromInput(currentFrom);
-    setToInput(currentTo);
+    void Promise.resolve().then(() => {
+      setSearchInput(currentSearch);
+      setFromInput(currentFrom);
+      setToInput(currentTo);
+    });
   }, [currentSearch, currentFrom, currentTo]);
 
   // Load tickets based on current URL query params
@@ -270,13 +272,13 @@ function MarketplaceContent() {
             <div>
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#5EEAD4]/10 text-[#5EEAD4] text-xs font-semibold border border-[#5EEAD4]/20 mb-2">
                 <Sparkles size={14} />
-                <span>Verified Secondary Ticket Exchange</span>
+                <span>Travel and event ticket marketplace</span>
               </div>
               <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">
                 Browse Available Tickets
               </h1>
               <p className="text-slate-300 text-sm mt-1">
-                Authentic P2P tickets with AI verification and 100% Escrow buyer protection.
+                Compare available listings and review each ticket’s document-check status before placing an order.
               </p>
             </div>
 
@@ -447,7 +449,7 @@ function MarketplaceContent() {
           <div className="py-24 flex flex-col items-center justify-center gap-4 bg-white rounded-3xl border border-slate-100 shadow-sm">
             <Loader2 size={36} className="animate-spin text-[#0D9488]" />
             <p className="text-sm font-semibold text-slate-500">
-              Fetching verified marketplace tickets...
+              Fetching marketplace tickets...
             </p>
           </div>
         )}
@@ -500,6 +502,9 @@ function MarketplaceContent() {
               const isFav = favoriteIds.has(t.id);
               const isPendingFav = togglingFavorite === t.id;
               const isVerified = t.verifications?.[0]?.verificationStatus === "VERIFIED";
+                const listingDetails = Object.entries(t.listingDetails || {})
+                  .filter(([, value]) => typeof value === "string" && value.trim())
+                  .slice(0, 2);
 
               return (
                 <div
@@ -516,7 +521,7 @@ function MarketplaceContent() {
                         {isVerified ? (
                           <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
                             <ShieldCheck size={12} />
-                            <span>AI Verified</span>
+                            <span>Checks passed</span>
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
@@ -592,16 +597,29 @@ function MarketplaceContent() {
                       </div>
                     </div>
 
+                    {listingDetails.length > 0 && (
+                      <div className="grid grid-cols-2 gap-2 text-[11px]">
+                        {listingDetails.map(([key, value]) => (
+                          <div key={key} className="bg-slate-50/80 p-2 rounded-xl">
+                            <span className="text-slate-400 block text-[10px] capitalize">
+                              {key.replace(/([A-Z])/g, " $1")}
+                            </span>
+                            <span className="font-semibold text-slate-800">{value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     {/* Seller details */}
                     <div className="flex items-center justify-between text-[11px] pt-1">
                       <span className="text-slate-400">
                         Seller:{" "}
                         <strong className="text-slate-700">
-                          {t.seller?.fullName || "Verified Seller"}
+                          {t.seller?.fullName || "Marketplace member"}
                         </strong>
                       </span>
                       <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md">
-                        Escrow Protected
+                        Sandbox / manual payments
                       </span>
                     </div>
                   </div>

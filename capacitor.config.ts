@@ -6,7 +6,9 @@ const config: CapacitorConfig = {
   webDir: "www",
   backgroundColor: "#1A1C43",
   server: {
-    url: process.env.CAPACITOR_SERVER_URL || "https://ticketlagbe.com",
+    url:
+      process.env.CAPACITOR_SERVER_URL ||
+      "https://ticketlagbe-marketplace-psi.vercel.app",
     cleartext: false,
     errorPath: "offline.html",
   },

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { paymentGateway } from "@/lib/payment/gateway";
+import { releaseExpiredReservations, restockTicket } from "@/lib/orders";
 
 /*
 |--------------------------------------------------------------------------
@@ -19,6 +20,8 @@ export async function GET(request: Request) {
         { status: 403 }
       );
     }
+
+    await releaseExpiredReservations();
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status")?.trim() || "";
@@ -66,7 +69,9 @@ export async function GET(request: Request) {
               },
             },
           },
-          payment: true,
+          payment: {
+            include: { reviewedBy: { select: { fullName: true, email: true } } },
+          },
           disputes: {
             take: 1,
             orderBy: { id: "desc" },
@@ -102,7 +107,9 @@ export async function GET(request: Request) {
 |--------------------------------------------------------------------------
 | PATCH /api/admin/orders
 |--------------------------------------------------------------------------
-| Force refund to buyer, force release payout to seller, or resolve dispute.
+| APPROVE_PAYMENT / REJECT_PAYMENT  review a submitted mobile-wallet payment
+| FORCE_REFUND                      refund the buyer from escrow
+| FORCE_COMPLETE                    release escrow to the seller
 */
 export async function PATCH(request: Request) {
   try {
@@ -116,7 +123,8 @@ export async function PATCH(request: Request) {
     }
 
     const body = await request.json();
-    const { orderId, action, resolutionNotes } = body;
+    const { orderId, action } = body;
+    const resolutionNotes = typeof body.resolutionNotes === "string" ? body.resolutionNotes.trim() : "";
 
     if (!orderId || !action) {
       return NextResponse.json(
@@ -141,26 +149,175 @@ export async function PATCH(request: Request) {
       );
     }
 
-    // 1. Force Refund to Buyer
+    const orderRef = `#${order.id.slice(-6)}`;
+    const amountLabel = `৳${order.orderTotal.toLocaleString()}`;
+
+    // 1. Approve a submitted wallet payment after checking the merchant statement
+    if (action === "APPROVE_PAYMENT") {
+      if (order.orderStatus !== "PAYMENT_SUBMITTED" || !order.payment) {
+        return NextResponse.json(
+          { success: false, message: "Only orders with a submitted payment can be approved." },
+          { status: 400 }
+        );
+      }
+
+      const payment = order.payment;
+      const updated = await prisma.$transaction(async (tx) => {
+        await tx.adminAction.create({
+          data: {
+            adminId: session.userId,
+            actionType: "APPROVE_MANUAL_PAYMENT",
+            targetType: "ORDER",
+            targetId: orderId,
+            details: `TrxID ${payment.trxId || "-"} from ${payment.senderNumber || "-"}. ${resolutionNotes}`.trim(),
+          },
+        });
+
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: {
+            paymentStatus: "PAID",
+            reviewedAt: new Date(),
+            reviewedById: session.userId,
+            reviewNote: resolutionNotes || null,
+          },
+        });
+
+        await tx.transaction.create({
+          data: {
+            orderId,
+            paymentId: payment.id,
+            transactionType: "ESCROW_DEPOSIT",
+            amount: order.orderTotal,
+            transactionStatus: "SUCCESS",
+          },
+        });
+
+        await tx.notification.create({
+          data: {
+            userId: order.buyerId,
+            type: "PAYMENT_SUCCESS",
+            message: `Payment of ${amountLabel} for order ${orderRef} is confirmed. Your ticket details are now available.`,
+          },
+        });
+
+        if (order.ticket?.sellerId) {
+          await tx.notification.create({
+            data: {
+              userId: order.ticket.sellerId,
+              type: "ESCROW_HOLD",
+              message: `Order ${orderRef} is paid. ${amountLabel} is held in escrow until the buyer confirms the trip.`,
+            },
+          });
+        }
+
+        return tx.order.update({
+          where: { id: orderId },
+          data: { orderStatus: "CONFIRMED" },
+          include: { payment: true, ticket: true },
+        });
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: "Payment approved and order confirmed.",
+        order: updated,
+      });
+    }
+
+    // 2. Reject a submitted payment (TrxID not found, wrong amount, etc.)
+    if (action === "REJECT_PAYMENT") {
+      if (order.orderStatus !== "PAYMENT_SUBMITTED" || !order.payment) {
+        return NextResponse.json(
+          { success: false, message: "Only orders with a submitted payment can be rejected." },
+          { status: 400 }
+        );
+      }
+
+      if (!resolutionNotes) {
+        return NextResponse.json(
+          { success: false, message: "Give the buyer a reason for rejecting the payment." },
+          { status: 400 }
+        );
+      }
+
+      const payment = order.payment;
+      const updated = await prisma.$transaction(async (tx) => {
+        await tx.adminAction.create({
+          data: {
+            adminId: session.userId,
+            actionType: "REJECT_MANUAL_PAYMENT",
+            targetType: "ORDER",
+            targetId: orderId,
+            details: `TrxID ${payment.trxId || "-"}: ${resolutionNotes}`,
+          },
+        });
+
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: {
+            paymentStatus: "REJECTED",
+            reviewedAt: new Date(),
+            reviewedById: session.userId,
+            reviewNote: resolutionNotes,
+          },
+        });
+
+        await restockTicket(tx, order);
+
+        await tx.notification.create({
+          data: {
+            userId: order.buyerId,
+            type: "PAYMENT_REJECTED",
+            message: `We could not verify your payment for order ${orderRef}: ${resolutionNotes}. The order was cancelled. If money was deducted, contact support with your TrxID.`,
+          },
+        });
+
+        return tx.order.update({
+          where: { id: orderId },
+          data: { orderStatus: "CANCELLED" },
+          include: { payment: true, ticket: true },
+        });
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: "Payment rejected, order cancelled and stock released.",
+        order: updated,
+      });
+    }
+
+    // 3. Refund buyer from escrow
     if (action === "FORCE_REFUND") {
+      if (
+        !["CONFIRMED", "REFUND_REQUESTED"].includes(order.orderStatus) ||
+        !order.payment ||
+        !["PAID", "REFUND_REQUESTED"].includes(order.payment.paymentStatus)
+      ) {
+        return NextResponse.json(
+          { success: false, message: "Only paid orders still in escrow can be refunded." },
+          { status: 400 }
+        );
+      }
+
+      const payment = order.payment;
       const refundResult = await paymentGateway.processRefund({
-        gatewayReference: order.payment?.gatewayReference || `TRX-${order.id}`,
+        gatewayReference: payment.gatewayReference || payment.trxId || `TRX-${order.id}`,
         amount: order.orderTotal,
         reason: resolutionNotes || "Admin enforced dispute refund",
       });
 
       const updated = await prisma.$transaction(async (tx) => {
-        // Log admin intervention
         await tx.adminAction.create({
           data: {
             adminId: session.userId,
             actionType: "FORCE_REFUND_ORDER",
             targetType: "ORDER",
             targetId: orderId,
+            details: `${refundResult.refundReference}. ${resolutionNotes}`.trim(),
           },
         });
 
-        // Close disputes
         await tx.dispute.updateMany({
           where: { orderId, disputeStatus: "OPEN" },
           data: {
@@ -169,36 +326,42 @@ export async function PATCH(request: Request) {
           },
         });
 
-        // Restock ticket
-        if (order.ticketId && order.quantity) {
-          await tx.ticket.update({
-            where: { id: order.ticketId },
+        await restockTicket(tx, order);
+
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: { paymentStatus: "REFUNDED" },
+        });
+
+        await tx.transaction.create({
+          data: {
+            orderId: order.id,
+            paymentId: payment.id,
+            transactionType: "ADMIN_FORCED_REFUND",
+            amount: order.orderTotal,
+            transactionStatus: "SUCCESS",
+          },
+        });
+
+        await tx.notification.create({
+          data: {
+            userId: order.buyerId,
+            type: "REFUND_COMPLETED",
+            message: `Your refund of ${amountLabel} for order ${orderRef} has been approved and sent to your original payment method.`,
+          },
+        });
+
+        if (order.ticket?.sellerId) {
+          await tx.notification.create({
             data: {
-              quantity: { increment: order.quantity },
-              ticketStatus: "AVAILABLE",
+              userId: order.ticket.sellerId,
+              type: "ORDER_REFUNDED",
+              message: `Order ${orderRef} was refunded to the buyer after review.${resolutionNotes ? ` Note: ${resolutionNotes}` : ""}`,
             },
           });
         }
 
-        // Update Payment status
-        if (order.payment) {
-          await tx.payment.update({
-            where: { id: order.payment.id },
-            data: { paymentStatus: "REFUNDED" },
-          });
-
-          await tx.transaction.create({
-            data: {
-              orderId: order.id,
-              paymentId: order.payment.id,
-              transactionType: "ADMIN_FORCED_REFUND",
-              amount: order.orderTotal,
-              transactionStatus: "SUCCESS",
-            },
-          });
-        }
-
-        return await tx.order.update({
+        return tx.order.update({
           where: { id: orderId },
           data: { orderStatus: "CANCELLED" },
           include: { payment: true, ticket: true },
@@ -213,8 +376,20 @@ export async function PATCH(request: Request) {
       });
     }
 
-    // 2. Force Release to Seller (Complete)
+    // 4. Release escrow to seller (dispute decided in seller's favour)
     if (action === "FORCE_COMPLETE") {
+      if (
+        !["CONFIRMED", "REFUND_REQUESTED"].includes(order.orderStatus) ||
+        !order.payment ||
+        !["PAID", "REFUND_REQUESTED"].includes(order.payment.paymentStatus)
+      ) {
+        return NextResponse.json(
+          { success: false, message: "Only paid orders still in escrow can be released." },
+          { status: 400 }
+        );
+      }
+
+      const payment = order.payment;
       const updated = await prisma.$transaction(async (tx) => {
         await tx.adminAction.create({
           data: {
@@ -222,6 +397,7 @@ export async function PATCH(request: Request) {
             actionType: "FORCE_RELEASE_ESCROW",
             targetType: "ORDER",
             targetId: orderId,
+            details: resolutionNotes || null,
           },
         });
 
@@ -233,14 +409,40 @@ export async function PATCH(request: Request) {
           },
         });
 
-        if (order.payment) {
-          await tx.payment.update({
-            where: { id: order.payment.id },
-            data: { paymentStatus: "PAID" },
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: { paymentStatus: "PAID" },
+        });
+
+        await tx.transaction.create({
+          data: {
+            orderId,
+            paymentId: payment.id,
+            transactionType: "ESCROW_RELEASE",
+            amount: order.orderTotal,
+            transactionStatus: "SUCCESS",
+          },
+        });
+
+        await tx.notification.create({
+          data: {
+            userId: order.buyerId,
+            type: "DISPUTE_RESOLVED",
+            message: `Order ${orderRef} was reviewed and payment was released to the seller.${resolutionNotes ? ` Note: ${resolutionNotes}` : ""}`,
+          },
+        });
+
+        if (order.ticket?.sellerId) {
+          await tx.notification.create({
+            data: {
+              userId: order.ticket.sellerId,
+              type: "PAYOUT_RELEASED",
+              message: `Your payout for order ${orderRef} has been released from escrow.`,
+            },
           });
         }
 
-        return await tx.order.update({
+        return tx.order.update({
           where: { id: orderId },
           data: { orderStatus: "COMPLETED" },
           include: { payment: true, ticket: true },
@@ -250,40 +452,6 @@ export async function PATCH(request: Request) {
       return NextResponse.json({
         success: true,
         message: "Escrow payout confirmed and released to seller.",
-        order: updated,
-      });
-    }
-
-    // 3. Admin manually approves/verifies bKash payment
-    if (action === "APPROVE_PAYMENT") {
-      const updated = await prisma.$transaction(async (tx) => {
-        await tx.adminAction.create({
-          data: {
-            adminId: session.userId,
-            actionType: "APPROVE_MANUAL_PAYMENT",
-            targetType: "ORDER",
-            targetId: orderId,
-            details: resolutionNotes || "Admin verified bKash TrxID and approved payment.",
-          },
-        });
-
-        if (order.payment) {
-          await tx.payment.update({
-            where: { id: order.payment.id },
-            data: { paymentStatus: "PAID" },
-          });
-        }
-
-        return await tx.order.update({
-          where: { id: orderId },
-          data: { orderStatus: "CONFIRMED" },
-          include: { payment: true, ticket: true },
-        });
-      });
-
-      return NextResponse.json({
-        success: true,
-        message: "Payment successfully approved and order confirmed.",
         order: updated,
       });
     }

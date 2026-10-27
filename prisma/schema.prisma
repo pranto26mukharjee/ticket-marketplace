@@ -33,6 +33,8 @@ model User {
   fraudAlerts    FraudAlert[]         @relation("FraudRelatedUser")
   resolvedAlerts FraudAlert[]         @relation("ResolvedAlerts")
   favorites      Favorite[]
+  documents      TicketDocument[]
+  verifiedPayments Payment[]          @relation("PaymentReviewer")
 }
 
 model Role {
@@ -99,6 +101,7 @@ model Ticket {
   // Legacy fields for backward compatibility
   title         String?
   description   String?
+  listingDetails Json?  @db.JsonB
   from          String?
   to            String?
   travelDate    DateTime?
@@ -122,7 +125,8 @@ model Ticket {
   fraudAlerts   FraudAlert[]
   orders        Order[] // Legacy compatibility
   favorites     Favorite[]
-  
+  document      TicketDocument?
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
@@ -187,10 +191,38 @@ model Payment {
   paymentMethod    String
   gatewayReference String?
   amount           Float
-  paymentStatus    String @default("PENDING")
+  paymentStatus    String @default("PENDING") // PENDING, PROCESSING, UNDER_REVIEW, PAID, FAILED, REJECTED, REFUND_REQUESTED, REFUNDED
+
+  // Manual mobile-wallet (bKash/Nagad/Rocket) submission, checked by an admin
+  trxId        String?   @unique
+  senderNumber String?
+  submittedAt  DateTime?
+  reviewedAt   DateTime?
+  reviewedById String?
+  reviewNote   String?
 
   order        Order         @relation(fields: [orderId], references: [id])
+  reviewedBy   User?         @relation("PaymentReviewer", fields: [reviewedById], references: [id])
   transactions Transaction[]
+}
+
+// Original ticket PDF, stored privately (never under /public) and released
+// only to the seller, admins, and the buyer of a confirmed order.
+model TicketDocument {
+  id        String   @id @default(cuid())
+  ownerId   String
+  ticketId  String?  @unique
+  fileName  String
+  mimeType  String   @default("application/pdf")
+  sizeBytes Int
+  sha256    String
+  data      Bytes
+  createdAt DateTime @default(now())
+
+  owner  User    @relation(fields: [ownerId], references: [id])
+  ticket Ticket? @relation(fields: [ticketId], references: [id])
+
+  @@index([sha256])
 }
 
 model Transaction {

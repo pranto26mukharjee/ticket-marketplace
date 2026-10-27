@@ -27,11 +27,11 @@ export const metadata: Metadata = {
     process.env.NEXT_PUBLIC_APP_URL || "https://ticketlagbe.com"
   ),
   title: {
-    default: "TicketLagbe — AI-Verified P2P Secondary Ticket Marketplace",
+    default: "TicketLagbe — Travel & Event Ticket Marketplace",
     template: "%s | TicketLagbe",
   },
   description:
-    "Bangladesh's premier AI-verified peer-to-peer ticket marketplace. Buy and sell train, bus, flight, and event tickets safely with automated fraud screening and 100% escrow protection.",
+    "Browse and list train, bus, flight, launch, concert, festival, and cinema tickets in Bangladesh. Review listing details and track orders from your account.",
   keywords: [
     "TicketLagbe",
     "P2P ticket marketplace",
@@ -41,8 +41,8 @@ export const metadata: Metadata = {
     "Bus ticket",
     "Event ticket",
     "Concert ticket",
-    "AI ticket verification",
-    "Escrow ticketing",
+    "Ticket listing review",
+    "Ticket resale marketplace",
     "Safe ticket resale",
   ],
   authors: [{ name: "TicketLagbe Team", url: "https://ticketlagbe.com" }],
@@ -58,9 +58,9 @@ export const metadata: Metadata = {
     locale: "en_BD",
     url: "https://ticketlagbe.com",
     siteName: "TicketLagbe",
-    title: "TicketLagbe — AI-Verified P2P Secondary Ticket Marketplace",
+    title: "TicketLagbe — Travel & Event Ticket Marketplace",
     description:
-      "Buy and sell authentic travel and event tickets in Bangladesh safely with AI verification, duplicate detection, and neutral escrow funds protection.",
+      "Browse and list travel and event tickets in Bangladesh. Review listing details and follow order updates from your account.",
     images: [
       {
         url: "/logo.png",
@@ -72,9 +72,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "TicketLagbe — AI-Verified P2P Secondary Ticket Marketplace",
+    title: "TicketLagbe — Travel & Event Ticket Marketplace",
     description:
-      "Safe, escrow-protected secondary ticketing for travel and events in Bangladesh.",
+      "Travel and event ticket listings with account-based order tracking.",
     images: ["/logo.png"],
   },
   robots: {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
+import { notifyAdmins } from "@/lib/orders";
 
 type RouteContext = {
   params: Promise<{
@@ -40,23 +41,25 @@ export async function GET(
           select: {
             id: true,
             fullName: true,
-            email: true,
             createdAt: true,
             profile: {
               select: {
                 identityVerified: true,
               },
             },
+            _count: { select: { reviewsReceived: true } },
           },
         },
         verifications: {
           take: 1,
+          orderBy: { id: "desc" },
           select: {
             id: true,
             verificationStatus: true,
             aiConfidenceScore: true,
             verificationMethod: true,
             decision: true,
+            extractedData: true,
           },
         },
       },
@@ -72,9 +75,39 @@ export async function GET(
       );
     }
 
+    const session = await getAuthUser(request);
+    const isOwnerOrAdmin = Boolean(
+      session && (session.userId === ticket.sellerId || session.role === "ADMIN")
+    );
+
+    // Listings under review, rejected or suspended are visible only to their seller and admins
+    if (!isOwnerOrAdmin && !["AVAILABLE", "SOLD"].includes(ticket.ticketStatus)) {
+      return NextResponse.json(
+        { success: false, message: "Ticket not found." },
+        { status: 404 }
+      );
+    }
+
+    const sellerRating = await prisma.review.aggregate({
+      where: { revieweeId: ticket.sellerId },
+      _avg: { rating: true },
+    });
+
     return NextResponse.json({
       success: true,
-      ticket,
+      ticket: {
+        ...ticket,
+        // The booking code is released to the buyer only after payment
+        ticketCode: isOwnerOrAdmin ? ticket.ticketCode : null,
+        verifications: ticket.verifications.map((v) => ({
+          ...v,
+          extractedData: isOwnerOrAdmin ? v.extractedData : null,
+        })),
+        seller: {
+          ...ticket.seller,
+          averageRating: sellerRating._avg.rating,
+        },
+      },
     });
   } catch (error) {
     console.error("Get ticket error:", error);
@@ -204,33 +237,102 @@ export async function PATCH(
           { status: 400 }
         );
       }
+      // The verified PDF fixes how many tickets exist; sellers can only lower it.
+      if (!isAdmin && numQty > ticket.quantity) {
+        return NextResponse.json(
+          { success: false, message: "You can reduce the quantity, but not add tickets beyond what was verified." },
+          { status: 400 }
+        );
+      }
       updateData.quantity = numQty;
-      if (numQty === 0 && (!ticketStatus || ticketStatus === "AVAILABLE")) {
+      if (numQty === 0 && ticket.ticketStatus === "AVAILABLE") {
         updateData.ticketStatus = "SOLD";
       }
     }
 
-    if (ticketStatus !== undefined) {
-      const validStatuses = ["AVAILABLE", "PAUSED", "CANCELLED", "SOLD"];
-      if (validStatuses.includes(ticketStatus)) {
-        updateData.ticketStatus = ticketStatus;
+    if (ticketStatus !== undefined && ticketStatus !== ticket.ticketStatus) {
+      // Moderation states are controlled by admins (/api/admin/tickets).
+      const lockedStatuses = ["PENDING_REVIEW", "REJECTED", "SUSPENDED"];
+      if (!isAdmin && lockedStatuses.includes(ticket.ticketStatus)) {
+        return NextResponse.json(
+          { success: false, message: `This listing is ${ticket.ticketStatus.replace("_", " ").toLowerCase()} and can't be changed until an admin reviews it.` },
+          { status: 403 }
+        );
       }
+
+      const sellerStatuses = ["AVAILABLE", "PAUSED", "CANCELLED"];
+      if (!sellerStatuses.includes(ticketStatus) && !isAdmin) {
+        return NextResponse.json(
+          { success: false, message: "Invalid listing status." },
+          { status: 400 }
+        );
+      }
+
+      if (ticketStatus === "AVAILABLE") {
+        const latest = await prisma.ticketVerification.findFirst({
+          where: { ticketId: id },
+          orderBy: { id: "desc" },
+          select: { verificationStatus: true },
+        });
+        if (latest?.verificationStatus !== "VERIFIED") {
+          return NextResponse.json(
+            { success: false, message: "Only verified listings can be published." },
+            { status: 400 }
+          );
+        }
+      }
+
+      updateData.ticketStatus = ticketStatus;
     }
 
-    // Safety rule: if there are already confirmed orders, don't allow modifying travel date
-    if (body.travelDate !== undefined && confirmedOrdersCount === 0) {
-      const parsedDate = new Date(body.travelDate);
-      if (!Number.isNaN(parsedDate.getTime())) {
-        updateData.travelDate = parsedDate;
-      }
+    // Seat or date changes invalidate the document check, so the listing goes
+    // back to admin review. Not allowed at all once tickets have been sold.
+    const parsedDate = body.travelDate !== undefined ? new Date(body.travelDate) : null;
+    const dateChanged =
+      parsedDate !== null &&
+      !Number.isNaN(parsedDate.getTime()) &&
+      parsedDate.getTime() !== ticket.travelDate?.getTime();
+    const seatChanged =
+      updateData.seatNumber !== undefined && updateData.seatNumber !== ticket.seatNumber;
+
+    if ((dateChanged || seatChanged) && confirmedOrdersCount > 0) {
+      return NextResponse.json(
+        { success: false, message: "Seat and date can't be changed after tickets have been sold." },
+        { status: 400 }
+      );
     }
 
-    const updatedTicket = await prisma.ticket.update({
-      where: { id },
-      data: updateData,
-      include: {
-        category: true,
-      },
+    if (dateChanged) {
+      updateData.travelDate = parsedDate;
+    }
+
+    const needsReview = !isAdmin && (dateChanged || seatChanged);
+    if (needsReview) {
+      updateData.ticketStatus = "PENDING_REVIEW";
+    }
+
+    const updatedTicket = await prisma.$transaction(async (tx) => {
+      if (needsReview) {
+        await tx.ticketVerification.create({
+          data: {
+            ticketId: id,
+            requestedById: session.userId,
+            verificationMethod: "MANUAL_REVIEW",
+            verificationStatus: "UNDER_REVIEW",
+            decision: "Seller changed the seat or date after verification; an admin must re-check the ticket PDF.",
+          },
+        });
+        await notifyAdmins(tx, "VERIFICATION_REVIEW", `Listing '${ticket.title}' was edited (seat/date) and needs re-verification.`);
+      }
+
+      return tx.ticket.update({
+        where: { id },
+        data: updateData,
+        omit: { ticketCode: !isOwner && !isAdmin },
+        include: {
+          category: true,
+        },
+      });
     });
 
     return NextResponse.json({

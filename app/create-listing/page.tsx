@@ -2,53 +2,59 @@
 
 import { FormEvent, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import {
   Upload,
   ShieldCheck,
-  Ticket,
   Loader2,
   AlertCircle,
   CheckCircle2,
   Sparkles,
-  FileText,
-  Calendar,
-  Clock,
-  MapPin,
-  Tag,
-  Armchair,
-  ArrowRight,
-  Info,
   Check,
 } from "lucide-react";
+import { TICKET_CATEGORY_CONFIG, type TicketCategory } from "@/lib/ticket-categories";
 
 export default function CreateListingPage() {
   const router = useRouter();
+  const [authChecking, setAuthChecking] = useState(true);
+  const [authError, setAuthError] = useState("");
 
   // Enforce authentication on mount
   useEffect(() => {
     async function checkAuth() {
       try {
         const res = await fetch("/api/auth/me", { cache: "no-store" });
-        if (!res.ok) {
-          router.replace("/login?redirect=/create-listing");
+        if (res.status === 401) {
+          window.location.replace("/login?redirect=/create-listing");
+          return;
         }
-      } catch {
-        router.replace("/login?redirect=/create-listing");
+        if (!res.ok) {
+          throw new Error("Could not verify your session. Please try again.");
+        }
+        const data = await res.json();
+        if (!data.success || !data.user) {
+          window.location.replace("/login?redirect=/create-listing");
+          return;
+        }
+        setAuthChecking(false);
+      } catch (error) {
+        console.error("Listing authentication check failed:", error);
+        setAuthError("Could not verify your session. Check your internet connection and try again.");
+        setAuthChecking(false);
       }
     }
     checkAuth();
-  }, [router]);
+  }, []);
 
   // Form states
   const [title, setTitle] = useState("");
-  const [category, setCategory] = useState("TRAIN");
+  const [category, setCategory] = useState<TicketCategory>("TRAIN");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [travelDate, setTravelDate] = useState("");
   const [travelTime, setTravelTime] = useState("");
   const [seatNumber, setSeatNumber] = useState("");
-  const [ticketType, setTicketType] = useState("Standard / AC");
+  const [ticketType, setTicketType] = useState<string>(TICKET_CATEGORY_CONFIG.TRAIN.ticketTypes[1]);
+  const [listingDetails, setListingDetails] = useState<Record<string, string>>({});
   const [price, setPrice] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [ticketCode, setTicketCode] = useState("");
@@ -57,7 +63,7 @@ export default function CreateListingPage() {
   // File upload state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadingFile, setUploadingFile] = useState(false);
-  const [documentUrl, setDocumentUrl] = useState<string | null>(null);
+  const [documentId, setDocumentId] = useState<string | null>(null);
   const [fileError, setFileError] = useState("");
 
   // Submission state
@@ -65,28 +71,35 @@ export default function CreateListingPage() {
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const categoryConfig = TICKET_CATEGORY_CONFIG[category];
 
   // Handle Document Selection and Immediate Upload
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+    setSelectedFile(null);
+    setDocumentId(null);
+    setFileError("");
 
-    // Validate size (10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      setFileError("Document exceeds maximum size of 10MB.");
+    // Validate size (4MB)
+    if (file.size > 4 * 1024 * 1024) {
+      setFileError("Document exceeds maximum size of 4MB.");
       return;
     }
 
-    // Validate extension
-    const validExts = ["pdf", "jpg", "jpeg", "png", "webp"];
+    // Verification accepts the original ticket PDF only.
+    const validExts = ["pdf"];
     const ext = file.name.split(".").pop()?.toLowerCase();
     if (!ext || !validExts.includes(ext)) {
-      setFileError(`Invalid format (.${ext}). Only PDF and standard images are allowed.`);
+      setSelectedFile(null);
+      setDocumentId(null);
+      setFileError("Only the original ticket PDF can be submitted for verification.");
       return;
     }
 
     setFileError("");
     setSelectedFile(file);
+    setDocumentId(null);
 
     try {
       setUploadingFile(true);
@@ -103,7 +116,7 @@ export default function CreateListingPage() {
         throw new Error(data.message || "Failed to upload document.");
       }
 
-      setDocumentUrl(data.documentUrl);
+      setDocumentId(data.documentId);
     } catch (err: unknown) {
       setFileError(err instanceof Error ? err.message : "Document upload failed.");
       setSelectedFile(null);
@@ -119,6 +132,19 @@ export default function CreateListingPage() {
 
     if (!title.trim() || !category || !from.trim() || !to.trim() || !travelDate || !price) {
       setError("Please fill in all required travel information.");
+      return;
+    }
+
+    if (!documentId || !selectedFile || !selectedFile.name.toLowerCase().endsWith(".pdf")) {
+      setError("Upload the original ticket PDF before submitting it for authentication.");
+      return;
+    }
+
+    const missingCategoryField = categoryConfig.detailFields.find(
+      (field) => field.required && !listingDetails[field.key]?.trim()
+    );
+    if (missingCategoryField) {
+      setError(`${missingCategoryField.label} is required for ${categoryConfig.label} tickets.`);
       return;
     }
 
@@ -147,7 +173,8 @@ export default function CreateListingPage() {
           quantity: Number(quantity) || 1,
           ticketCode: ticketCode.trim() || null,
           description: description.trim() || null,
-          documentUrl,
+          documentId,
+          listingDetails,
         }),
       });
 
@@ -155,13 +182,13 @@ export default function CreateListingPage() {
 
       if (!response.ok) {
         if (response.status === 401) {
-          router.push("/login?redirect=/create-listing");
+          window.location.replace("/login?redirect=/create-listing");
           return;
         }
         throw new Error(data.message || "Failed to create ticket listing.");
       }
 
-      setSuccess("Ticket analyzed by AI and listed successfully!");
+      setSuccess("Ticket checks completed and listing submitted.");
       setTimeout(() => {
         router.push(`/verification-result?id=${data.ticket.id}`);
       }, 1000);
@@ -172,6 +199,32 @@ export default function CreateListingPage() {
     }
   }
 
+  if (authChecking || authError) {
+    return (
+      <main className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-4">
+        <div className="max-w-md text-center space-y-4">
+          {authChecking ? (
+            <>
+              <Loader2 className="w-8 h-8 animate-spin text-[#0D9488] mx-auto" />
+              <p className="text-sm text-slate-600">Checking your account...</p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-red-700">{authError}</p>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="px-5 py-2.5 rounded-xl bg-[#0D9488] text-white font-semibold text-sm"
+              >
+                Retry
+              </button>
+            </>
+          )}
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[#F8FAFC] text-slate-800 py-12 px-4">
       <div className="max-w-3xl mx-auto space-y-6">
@@ -179,13 +232,13 @@ export default function CreateListingPage() {
         <div className="text-center space-y-2">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#5EEAD4]/10 text-[#0D9488] border border-[#5EEAD4]/30 text-xs font-bold mb-1">
             <Sparkles size={14} />
-            <span>AI Automated Ticket Verification</span>
+            <span>Ticket document checks</span>
           </div>
           <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight">
             List a Spare Ticket for Sale
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 max-w-lg mx-auto">
-            Upload your genuine e-ticket. Our AI screens the document format, route timestamps, and ensures zero duplication.
+            Upload the original ticket PDF. Required details and possible duplicates are checked; some submissions need administrator review.
           </p>
         </div>
 
@@ -221,15 +274,17 @@ export default function CreateListingPage() {
                   </label>
                   <select
                     value={category}
-                    onChange={(e) => setCategory(e.target.value)}
+                    onChange={(e) => {
+                      const nextCategory = e.target.value as TicketCategory;
+                      setCategory(nextCategory);
+                      setTicketType(TICKET_CATEGORY_CONFIG[nextCategory].ticketTypes[0]);
+                      setListingDetails({});
+                    }}
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488] cursor-pointer"
                   >
-                    <option value="TRAIN">Train (Bangladesh Railway)</option>
-                    <option value="BUS">Bus (Intercity Coach)</option>
-                    <option value="FLIGHT">Flight (Domestic)</option>
-                    <option value="LAUNCH">Launch (Riverway)</option>
-                    <option value="CONCERT">Concert / Musical Event</option>
-                    <option value="MOVIE">Cinema / Movie Pass</option>
+                    {Object.entries(TICKET_CATEGORY_CONFIG).map(([value, config]) => (
+                      <option key={value} value={value}>{config.label}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -240,12 +295,33 @@ export default function CreateListingPage() {
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Subarna Express Snigdha Seat"
+                    placeholder={categoryConfig.titlePlaceholder}
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488]"
                   />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {categoryConfig.detailFields.map((field) => (
+                  <div key={field.key}>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      {field.label}{field.required ? " *" : ""}
+                    </label>
+                    <input
+                      type="text"
+                      required={field.required}
+                      placeholder={field.placeholder}
+                      value={listingDetails[field.key] || ""}
+                      onChange={(event) => setListingDetails((current) => ({
+                        ...current,
+                        [field.key]: event.target.value,
+                      }))}
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488]"
+                    />
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -253,18 +329,18 @@ export default function CreateListingPage() {
             <div className="space-y-4">
               <h2 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2 border-b border-slate-100 pb-2">
                 <span className="w-5 h-5 rounded-full bg-[#1A1C43] text-white flex items-center justify-center text-[10px]">2</span>
-                <span>Route, Date & Schedule</span>
+                <span>{category === "CONCERT" || category === "MUSIC" || category === "MOVIE" ? "Venue & Event Schedule" : "Route & Travel Schedule"}</span>
               </h2>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Origin Station / City (From) *
+                    {categoryConfig.fromLabel} *
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Dhaka (Kamalapur)"
+                    placeholder={category === "FLIGHT" ? "Hazrat Shahjalal International Airport (DAC)" : category === "CONCERT" || category === "MUSIC" || category === "MOVIE" ? "Dhaka" : "Dhaka (Kamalapur)"}
                     value={from}
                     onChange={(e) => setFrom(e.target.value)}
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488]"
@@ -273,12 +349,12 @@ export default function CreateListingPage() {
 
                 <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Destination Station / City (To) *
+                    {categoryConfig.toLabel} *
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Chittagong"
+                    placeholder={category === "FLIGHT" ? "Shah Amanat International Airport (CGP)" : category === "CONCERT" || category === "MUSIC" || category === "MOVIE" ? "International Convention City Bashundhara" : "Chattogram"}
                     value={to}
                     onChange={(e) => setTo(e.target.value)}
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488]"
@@ -287,7 +363,7 @@ export default function CreateListingPage() {
 
                 <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Departure Date *
+                    {categoryConfig.dateLabel} *
                   </label>
                   <input
                     type="date"
@@ -300,7 +376,7 @@ export default function CreateListingPage() {
 
                 <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Departure Time (Optional)
+                    {categoryConfig.timeLabel} (Optional)
                   </label>
                   <input
                     type="text"
@@ -320,18 +396,34 @@ export default function CreateListingPage() {
                 <span>Seat, Inventory & Price</span>
               </h2>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Seat Number / Coach
+                    {categoryConfig.seatLabel}
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. Kha-14 or G-12"
+                    placeholder={category === "TRAIN" ? "Coach Kha, seat 14" : category === "BUS" ? "Coach 3, seat A2" : category === "LAUNCH" ? "Cabin 302 / seat 4" : category === "FLIGHT" ? "12A" : category === "MOVIE" ? "Screen 4, row C, seat 8" : "Zone A / seat 14"}
                     value={seatNumber}
                     onChange={(e) => setSeatNumber(e.target.value)}
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488]"
                   />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    {categoryConfig.ticketTypeLabel} *
+                  </label>
+                  <select
+                    required
+                    value={ticketType}
+                    onChange={(event) => setTicketType(event.target.value)}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488]"
+                  >
+                    {categoryConfig.ticketTypes.map((type) => (
+                      <option key={type} value={type}>{type}</option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>
@@ -367,11 +459,11 @@ export default function CreateListingPage() {
               {/* Booking Reference / PNR for duplicate screening */}
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1">
-                  Booking Reference / PNR / Ticket Number (For Verification)
+                  {categoryConfig.referenceLabel} (For Verification)
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. BR-994821 or PNR-582918"
+                  placeholder={categoryConfig.referencePlaceholder}
                   value={ticketCode}
                   onChange={(e) => setTicketCode(e.target.value)}
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-[#0D9488]"
@@ -386,14 +478,14 @@ export default function CreateListingPage() {
             <div className="space-y-4">
               <h2 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2 border-b border-slate-100 pb-2">
                 <span className="w-5 h-5 rounded-full bg-[#1A1C43] text-white flex items-center justify-center text-[10px]">4</span>
-                <span>Ticket Document Upload (PDF or Image)</span>
+                <span>Ticket Authentication Document (PDF Required)</span>
               </h2>
 
               <div className="border-2 border-dashed border-slate-200 hover:border-[#0D9488] rounded-3xl p-6 text-center transition bg-slate-50/50">
                 <input
                   type="file"
                   id="ticket-doc"
-                  accept=".pdf,.png,.jpg,.jpeg,.webp"
+                  accept="application/pdf,.pdf"
                   onChange={handleFileChange}
                   className="hidden"
                 />
@@ -401,7 +493,7 @@ export default function CreateListingPage() {
                   <div className="w-12 h-12 rounded-2xl bg-teal-50 text-[#0D9488] flex items-center justify-center mx-auto">
                     {uploadingFile ? (
                       <Loader2 size={24} className="animate-spin" />
-                    ) : documentUrl ? (
+                    ) : documentId ? (
                       <CheckCircle2 size={24} className="text-emerald-500" />
                     ) : (
                       <Upload size={24} />
@@ -414,14 +506,14 @@ export default function CreateListingPage() {
                         ? "Uploading & screening document..."
                         : selectedFile
                         ? selectedFile.name
-                        : "Click to upload original e-ticket document"}
+                        : "Click to upload the original ticket PDF *"}
                     </span>
                     <span className="text-[11px] text-slate-400">
-                      Supports PDF, PNG, JPG (Max 10MB)
+                      PDF only, max 4 MB. Our AI reads it to confirm the route, date, seat and booking reference match your listing. It stays private and is shared with the buyer only after payment.
                     </span>
                   </div>
 
-                  {documentUrl && (
+                  {documentId && (
                     <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
                       <Check size={12} />
                       <span>Document Uploaded Securely</span>
@@ -459,7 +551,7 @@ export default function CreateListingPage() {
                 {aiAnalyzing ? (
                   <>
                     <Loader2 size={18} className="animate-spin" />
-                    <span>Running AI Verification & Duplicate Checks...</span>
+                    <span>Checking ticket details...</span>
                   </>
                 ) : (
                   <>

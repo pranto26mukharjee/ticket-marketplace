@@ -18,8 +18,6 @@ import {
   X,
   MessageSquare,
   Package,
-  HelpCircle,
-  Sparkles,
 } from "lucide-react";
 import NotificationDropdown from "@/components/NotificationDropdown";
 
@@ -61,9 +59,6 @@ export default function Navbar() {
         setUser(null);
       });
 
-    // Close menus on route change
-    setMobileMenuOpen(false);
-    setUserMenuOpen(false);
   }, [pathname]);
 
   // Close user dropdown when clicking outside
@@ -99,7 +94,7 @@ export default function Navbar() {
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (searchQuery.trim()) {
-      router.push(`/tickets?q=${encodeURIComponent(searchQuery.trim())}`);
+      router.push(`/tickets?search=${encodeURIComponent(searchQuery.trim())}`);
       setSearchQuery("");
       setMobileMenuOpen(false);
     }
@@ -167,15 +162,15 @@ export default function Navbar() {
           </Link>
 
           <Link
-            href="/verification-result"
+            href="/how-it-works"
             className={`flex items-center gap-1.5 transition ${
-              pathname === "/verification-result"
+              pathname === "/how-it-works"
                 ? "text-[#5EEAD4]"
                 : "text-slate-300 hover:text-white"
             }`}
           >
             <ShieldCheck size={14} className="text-teal-400" />
-            <span>How Escrow Works</span>
+            <span>How It Works</span>
           </Link>
 
           {/* Sell Ticket Link / Button */}
@@ -194,7 +189,7 @@ export default function Navbar() {
             <div className="flex items-center gap-3">
               {/* Favorites Heart Icon */}
               <Link
-                href="/dashboard?tab=favorites"
+                href="/favorites"
                 title="Saved Tickets"
                 className="w-9 h-9 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-slate-700/60 flex items-center justify-center text-slate-300 hover:text-rose-400 transition"
               >
@@ -306,16 +301,16 @@ export default function Navbar() {
                       </Link>
 
                       <Link
-                        href="/dashboard?tab=inquiries"
+                        href="/notifications?filter=INQUIRIES"
                         onClick={() => setUserMenuOpen(false)}
                         className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 text-slate-700"
                       >
                         <MessageSquare size={14} className="text-slate-400" />
-                        <span>Buyer Inquiries</span>
+                        <span>Notifications & Inquiries</span>
                       </Link>
 
                       <Link
-                        href="/dashboard?tab=favorites"
+                        href="/favorites"
                         onClick={() => setUserMenuOpen(false)}
                         className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 text-slate-700"
                       >
@@ -324,7 +319,7 @@ export default function Navbar() {
                       </Link>
 
                       <Link
-                        href="/dashboard?tab=profile"
+                        href="/profile"
                         onClick={() => setUserMenuOpen(false)}
                         className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 text-slate-700"
                       >
@@ -411,12 +406,12 @@ export default function Navbar() {
               Browse Verified Tickets
             </Link>
             <Link
-              href="/verification-result"
+              href="/how-it-works"
               onClick={() => setMobileMenuOpen(false)}
               className="block px-3 py-2 rounded-lg hover:bg-slate-800 text-teal-300 flex items-center gap-1.5"
             >
               <ShieldCheck size={16} />
-              How Escrow Works
+              How It Works
             </Link>
             <Link
               href="/create-listing"
@@ -472,11 +467,25 @@ export default function Navbar() {
                   My Listings
                 </Link>
                 <Link
-                  href="/dashboard?tab=inquiries"
+                  href="/notifications"
                   onClick={() => setMobileMenuOpen(false)}
                   className="p-2.5 bg-slate-800/80 rounded-lg text-center text-slate-200"
                 >
-                  Inquiries
+                  Updates
+                </Link>
+                <Link
+                  href="/favorites"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="p-2.5 bg-slate-800/80 rounded-lg text-center text-slate-200"
+                >
+                  Saved
+                </Link>
+                <Link
+                  href="/profile"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="p-2.5 bg-slate-800/80 rounded-lg text-center text-slate-200"
+                >
+                  Profile
                 </Link>
               </div>
 

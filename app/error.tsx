@@ -80,6 +80,10 @@ export default function ErrorBoundary({
             className="text-teal-600 hover:underline font-medium"
           >
             support@ticketlagbe.com
+          </a>{" "}
+          or call{" "}
+          <a href="tel:+8801601601706" className="text-teal-600 hover:underline font-medium">
+            01601601706
           </a>
         </div>
       </div>

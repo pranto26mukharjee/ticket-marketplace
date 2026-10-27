@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { paymentGateway } from "@/lib/payment/gateway";
+import { restockTicket } from "@/lib/orders";
 
 /*
 |--------------------------------------------------------------------------
@@ -25,7 +26,8 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { orderId, reason = "Customer requested refund" } = body;
+    const { orderId } = body;
+    const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason.trim() : "Customer requested refund";
 
     if (!orderId) {
       return NextResponse.json(
@@ -55,36 +57,35 @@ export async function POST(request: Request) {
       );
     }
 
-    // Role check: Only buyer, seller, or admin can process/trigger refund
-    const isBuyer = order.buyerId === session.userId;
-    const isSeller = order.ticket?.sellerId === session.userId;
-    const isAdmin = session.role === "ADMIN";
-
-    if (!isBuyer && !isSeller && !isAdmin) {
+    // Refunds move escrowed money, so only an administrator can issue one.
+    // Buyers ask for a refund through PATCH /api/orders/[id] (REFUND_REQUEST).
+    if (session.role !== "ADMIN") {
       return NextResponse.json(
         {
           success: false,
-          message: "You are not authorized to refund this order.",
+          message: "Only administrators can issue refunds. Please submit a refund request from your order page.",
         },
         { status: 403 }
       );
     }
 
-    if (order.orderStatus === "CANCELLED" && order.payment?.paymentStatus === "REFUNDED") {
+    if (!order.payment || !["PAID", "REFUND_REQUESTED"].includes(order.payment.paymentStatus)) {
       return NextResponse.json(
         {
           success: false,
-          message: "This order has already been refunded.",
+          message: order.payment?.paymentStatus === "REFUNDED"
+            ? "This order has already been refunded."
+            : "This order has no captured payment to refund.",
         },
         { status: 400 }
       );
     }
 
-    if (!order.payment) {
+    if (!["CONFIRMED", "REFUND_REQUESTED"].includes(order.orderStatus)) {
       return NextResponse.json(
         {
           success: false,
-          message: "No payment record found for this order.",
+          message: "Only confirmed orders whose escrow has not been released can be refunded.",
         },
         { status: 400 }
       );
@@ -130,17 +131,22 @@ export async function POST(request: Request) {
       });
 
       // 3. Restore ticket stock
-      if (order.ticketId && order.quantity) {
-        await tx.ticket.update({
-          where: { id: order.ticketId },
-          data: {
-            quantity: {
-              increment: order.quantity,
-            },
-            ticketStatus: "AVAILABLE",
-          },
-        });
-      }
+      await restockTicket(tx, order);
+
+      await tx.dispute.updateMany({
+        where: { orderId: order.id, disputeStatus: "OPEN" },
+        data: { disputeStatus: "RESOLVED_REFUND", resolutionNotes: reason },
+      });
+
+      await tx.adminAction.create({
+        data: {
+          adminId: session.userId,
+          actionType: "REFUND_ORDER",
+          targetType: "ORDER",
+          targetId: order.id,
+          details: `${refundResult.refundReference}: ${reason}`,
+        },
+      });
 
       // 4. Record ledger transaction
       await tx.transaction.create({

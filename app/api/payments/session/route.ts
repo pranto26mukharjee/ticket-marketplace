@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { paymentGateway, PaymentMethodType } from "@/lib/payment/gateway";
+import { getEnabledPaymentMethods, paymentGateway, PaymentMethodType } from "@/lib/payment/gateway";
 
 /*
 |--------------------------------------------------------------------------
@@ -36,14 +36,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const validMethods: PaymentMethodType[] = ["BKASH", "NAGAD", "CARD", "ROCKET"];
+    const validMethods = getEnabledPaymentMethods();
     const normalizedMethod = (paymentMethod?.toUpperCase() || "BKASH") as PaymentMethodType;
 
     if (!validMethods.includes(normalizedMethod)) {
       return NextResponse.json(
         {
           success: false,
-          message: "Invalid payment method. Supported: BKASH, NAGAD, CARD, ROCKET.",
+          message: `Invalid payment method. Supported: ${validMethods.join(", ")}.`,
         },
         { status: 400 }
       );
@@ -76,7 +76,7 @@ export async function POST(request: Request) {
     }
 
     // 2. Ownership check
-    if (order.buyerId !== session.userId && session.role !== "ADMIN") {
+    if (order.buyerId !== session.userId) {
       return NextResponse.json(
         {
           success: false,
@@ -97,11 +97,14 @@ export async function POST(request: Request) {
       );
     }
 
-    if (order.orderStatus === "CANCELLED") {
+    if (order.orderStatus !== "PENDING") {
       return NextResponse.json(
         {
           success: false,
-          message: "Cannot pay for a cancelled order.",
+          message:
+            order.orderStatus === "CANCELLED"
+              ? "This order was cancelled or its reservation expired."
+              : "Payment for this order has already been submitted.",
         },
         { status: 400 }
       );

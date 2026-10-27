@@ -44,6 +44,9 @@ type TicketData = {
 
 type PaymentMethod = "BKASH" | "NAGAD" | "CARD" | "ROCKET";
 
+// Card payments are a simulation; only offer them when the server runs in sandbox mode.
+const CARD_ENABLED = process.env.NEXT_PUBLIC_PAYMENT_SANDBOX === "true";
+
 interface PendingOrderData {
   id: string;
   orderTotal: number;
@@ -92,6 +95,7 @@ function CheckoutContent() {
   const [cardExpiry, setCardExpiry] = useState("");
   const [cardCvv, setCardCvv] = useState("");
   const [gatewayStep, setGatewayStep] = useState<"INPUT" | "OTP" | "PROCESSING" | "SUCCESS">("INPUT");
+  const [paymentUnderReview, setPaymentUnderReview] = useState(false);
   const [gatewayError, setGatewayError] = useState("");
 
   const handleCopyNumber = (num: string) => {
@@ -108,13 +112,15 @@ function CheckoutContent() {
     const id = params.get("ticketId");
 
     if (!id) {
-      setError("Ticket information is missing. Please select a ticket from the marketplace.");
-      setLoading(false);
+      void Promise.resolve().then(() => {
+        setError("Ticket information is missing. Please select a ticket from the marketplace.");
+        setLoading(false);
+      });
       return;
     }
 
-    setTicketId(id);
-  }, []);
+    void Promise.resolve().then(() => setTicketId(id));
+  }, [router]);
 
   // 2. Load ticket
   useEffect(() => {
@@ -208,7 +214,7 @@ function CheckoutContent() {
     };
 
     loadUser();
-  }, []);
+  }, [router]);
 
   // Price calculation (5% escrow guarantee fee)
   const ticketPrice = ticket ? ticket.price * quantity : 0;
@@ -348,12 +354,17 @@ function CheckoutContent() {
         return;
       }
 
+      const underReview = data.status === "UNDER_REVIEW";
+      setPaymentUnderReview(underReview);
       setGatewayStep("SUCCESS");
 
-      // Redirect after showing celebration
       setTimeout(() => {
-        router.push(`/order-success?orderId=${pendingOrder.id}&trx=${data.transactionId || gatewayRef}`);
-      }, 1200);
+        router.push(
+          underReview
+            ? `/order/${pendingOrder.id}`
+            : `/order-success?orderId=${pendingOrder.id}&trx=${data.transactionId || gatewayRef}`
+        );
+      }, underReview ? 2500 : 1200);
     } catch (err) {
       console.error("Verification error:", err);
       setGatewayStep("INPUT");
@@ -407,15 +418,15 @@ function CheckoutContent() {
           <div className="mt-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
-                Secure Escrow Checkout
+                Checkout
               </h1>
               <p className="mt-1 text-slate-600 text-sm">
-                Your payment is held in neutral escrow until your travel is completed successfully.
+                Review your order details and payment method before continuing.
               </p>
             </div>
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700">
               <ShieldCheck className="h-4 w-4" />
-              100% Escrow Protection Guaranteed
+              Sandbox / manual payment flow
             </div>
           </div>
         </div>
@@ -632,7 +643,8 @@ function CheckoutContent() {
                   )}
                 </button>
 
-                {/* Card */}
+                {/* Card (sandbox only) */}
+                {CARD_ENABLED && (
                 <button
                   type="button"
                   onClick={() => setPaymentMethod("CARD")}
@@ -657,6 +669,7 @@ function CheckoutContent() {
                     </span>
                   )}
                 </button>
+                )}
 
                 {/* Rocket */}
                 <button
@@ -747,14 +760,13 @@ function CheckoutContent() {
                 )}
               </button>
 
-              {/* Escrow Guarantee Highlight */}
-              <div className="mt-5 space-y-2 rounded-xl bg-emerald-50/80 border border-emerald-100 p-3.5">
-                <div className="flex items-center gap-2 text-xs font-bold text-emerald-800">
-                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                  TicketLagbe Escrow Protocol
+              <div className="mt-5 space-y-2 rounded-xl bg-amber-50 border border-amber-200 p-3.5">
+                <div className="flex items-center gap-2 text-xs font-bold text-amber-900">
+                  <ShieldCheck className="h-4 w-4 text-amber-700" />
+                  Payment environment notice
                 </div>
-                <p className="text-[11px] leading-relaxed text-emerald-700">
-                  Funds will NOT be released to the seller until after your journey departure datetime. If the ticket is invalid, you can dispute and receive a full instant refund.
+                <p className="text-[11px] leading-relaxed text-amber-900">
+                  Payment methods in this project are sandbox/manual flows. Do not send real money; production payment processing and settlement are not configured.
                 </p>
               </div>
             </div>
@@ -876,11 +888,17 @@ function CheckoutContent() {
                   <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
                     <CheckCircle2 className="h-8 w-8" />
                   </div>
-                  <h4 className="mt-4 font-extrabold text-slate-900 text-lg">Payment Verified!</h4>
+                  <h4 className="mt-4 font-extrabold text-slate-900 text-lg">
+                    {paymentUnderReview ? "Payment Submitted" : "Payment Verified!"}
+                  </h4>
                   <p className="mt-1 text-xs text-slate-600">
-                    ৳{totalAmount.toLocaleString()} has been safely locked in TicketLagbe Escrow.
+                    {paymentUnderReview
+                      ? "We're matching your TrxID with our wallet statement. Your ticket is reserved and will be released as soon as the payment is confirmed."
+                      : `৳${totalAmount.toLocaleString()} has been safely locked in TicketLagbe Escrow.`}
                   </p>
-                  <p className="mt-3 text-xs font-semibold text-emerald-600">Redirecting to order pass...</p>
+                  <p className="mt-3 text-xs font-semibold text-emerald-600">
+                    {paymentUnderReview ? "Opening your order..." : "Redirecting to order pass..."}
+                  </p>
                 </div>
               )}
 

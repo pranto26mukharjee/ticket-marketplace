@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ShoppingBag,
@@ -24,12 +24,12 @@ import {
   Eye,
   BarChart3,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import SellerEarningsChart from "@/components/SellerEarningsChart";
 
 type User = {
   id: string;
-  fullName: string;
+  fullName: string | null;
   email: string;
   phone: string | null;
   role: string;
@@ -40,15 +40,15 @@ type Listing = {
   title: string;
   category?: string | { id?: string; categoryName?: string; ticketType?: string | null } | null;
   description: string | null;
-  from: string;
-  to: string;
-  travelDate: string;
+  from: string | null;
+  to: string | null;
+  travelDate: string | null;
   travelTime: string | null;
   seatNumber: string | null;
   ticketType: string | null;
   price: number;
   quantity: number;
-  status: "AVAILABLE" | "SOLD" | "CANCELLED";
+  ticketStatus: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -65,8 +65,8 @@ type Stats = {
 type Purchase = {
   id: string;
   quantity: number;
-  totalAmount: number;
-  status: "PENDING" | "CONFIRMED" | "CANCELLED";
+  orderTotal: number;
+  orderStatus: string;
   paymentMethod: string | null;
   createdAt: string;
 
@@ -74,15 +74,15 @@ type Purchase = {
     id: string;
     title: string;
     category?: string | { id?: string; categoryName?: string; ticketType?: string | null } | null;
-    from: string;
-    to: string;
-    travelDate: string;
+    from: string | null;
+    to: string | null;
+    travelDate: string | null;
     travelTime: string | null;
     seatNumber: string | null;
     ticketType: string | null;
-    price: number;
-    status: "AVAILABLE" | "SOLD" | "CANCELLED";
-  };
+    price: number | null;
+    ticketStatus: string;
+  } | null;
 };
 
 type PurchaseSummary = {
@@ -103,12 +103,21 @@ function formatCategory(category: unknown): string {
   return "GENERAL";
 }
 
-export default function DashboardPage() {
+function DashboardContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const dashboardTabs = ["overview", "purchases", "listings", "analytics"] as const;
+  type DashboardTab = (typeof dashboardTabs)[number];
+  const requestedTab = searchParams.get("tab") as DashboardTab | null;
+  const activeTab: DashboardTab = requestedTab && dashboardTabs.includes(requestedTab)
+    ? requestedTab
+    : "overview";
 
-  const [activeTab, setActiveTab] = useState<
-    "overview" | "purchases" | "listings" | "analytics"
-  >("overview");
+  function selectDashboardTab(tab: DashboardTab) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", tab);
+    router.replace(`/dashboard?${params.toString()}`, { scroll: false });
+  }
 
   const [user, setUser] = useState<User | null>(null);
 
@@ -148,7 +157,7 @@ export default function DashboardPage() {
   // LOAD SELLER DASHBOARD
   // ==================================================
 
-  async function loadDashboard(showLoader = true) {
+  const loadDashboard = useCallback(async (showLoader = true) => {
     try {
       if (showLoader) {
         setLoading(true);
@@ -165,7 +174,7 @@ export default function DashboardPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        if (response.status === 401 || response.status === 404) {
+        if (response.status === 401) {
           router.replace("/login?redirect=/dashboard");
           return;
         }
@@ -178,7 +187,14 @@ export default function DashboardPage() {
       }
 
       setUser(data.user);
-      setStats(data.stats);
+      setStats(data.stats || {
+        totalListings: 0,
+        activeListings: 0,
+        soldListings: 0,
+        cancelledListings: 0,
+        totalSales: 0,
+        totalListingValue: 0,
+      });
       setListings(data.listings || []);
     } catch (error) {
       console.error("Dashboard loading error:", error);
@@ -190,13 +206,13 @@ export default function DashboardPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }
+  }, [router]);
 
   // ==================================================
   // LOAD BUYER PURCHASES
   // ==================================================
 
-  async function loadPurchases(showLoader = true) {
+  const loadPurchases = useCallback(async (showLoader = true) => {
     try {
       if (showLoader) {
         setPurchasesLoading(true);
@@ -211,7 +227,7 @@ export default function DashboardPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        if (response.status === 401 || response.status === 404) {
+        if (response.status === 401) {
           router.replace("/login?redirect=/dashboard");
           return;
         }
@@ -223,17 +239,17 @@ export default function DashboardPage() {
         return;
       }
 
-      setPurchases(data.orders || []);
-
-      setPurchaseSummary(
-        data.summary || {
-          totalOrders: 0,
-          pendingOrders: 0,
-          confirmedOrders: 0,
-          cancelledOrders: 0,
-          totalSpent: 0,
-        }
-      );
+      const orders: Purchase[] = Array.isArray(data.orders) ? data.orders : [];
+      setPurchases(orders);
+      setPurchaseSummary({
+        totalOrders: orders.length,
+        pendingOrders: orders.filter((order) => order.orderStatus === "PENDING").length,
+        confirmedOrders: orders.filter((order) => order.orderStatus === "CONFIRMED").length,
+        cancelledOrders: orders.filter((order) => order.orderStatus === "CANCELLED").length,
+        totalSpent: orders
+          .filter((order) => order.orderStatus !== "CANCELLED")
+          .reduce((total, order) => total + (Number(order.orderTotal) || 0), 0),
+      });
     } catch (error) {
       console.error("Purchases loading error:", error);
 
@@ -243,7 +259,7 @@ export default function DashboardPage() {
     } finally {
       setPurchasesLoading(false);
     }
-  }
+  }, [router]);
 
   // ==================================================
   // INITIAL LOAD & STRICT AUTH GUARD
@@ -255,8 +271,14 @@ export default function DashboardPage() {
     async function verifyAndLoad() {
       try {
         const res = await fetch("/api/auth/me", { cache: "no-store" });
-        if (!res.ok) {
+        if (res.status === 401) {
           router.replace("/login?redirect=/dashboard");
+          return;
+        }
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          setError(data?.message || "Could not verify your session. Please try again.");
+          setLoading(false);
           return;
         }
         const data = await res.json();
@@ -272,8 +294,10 @@ export default function DashboardPage() {
           loadDashboard(false);
           loadPurchases(false);
         }, 20000);
-      } catch {
-        router.replace("/login?redirect=/dashboard");
+      } catch (error) {
+        console.error("Dashboard authentication check failed:", error);
+        setError("Could not verify your session. Check your internet connection and try again.");
+        setLoading(false);
       }
     }
 
@@ -282,7 +306,7 @@ export default function DashboardPage() {
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, []);
+  }, [loadDashboard, loadPurchases, router]);
 
   // ==================================================
   // LOGOUT
@@ -323,7 +347,8 @@ export default function DashboardPage() {
   // DATE FORMAT
   // ==================================================
 
-  function formatDate(date: string) {
+  function formatDate(date: string | null) {
+    if (!date) return "Date not available";
     return new Date(date).toLocaleDateString("en-BD", {
       day: "numeric",
       month: "short",
@@ -363,7 +388,22 @@ export default function DashboardPage() {
   }
 
   if (!user) {
-    return null;
+    return (
+      <main className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-4">
+        <div className="max-w-md text-center space-y-4">
+          <p className="text-sm text-red-700">
+            {error || "Your dashboard could not be loaded."}
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="px-5 py-2.5 rounded-xl bg-[#0D9488] text-white font-semibold text-sm"
+          >
+            Retry
+          </button>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -391,6 +431,16 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">
+
+            {user.role === "ADMIN" && (
+              <Link
+                href="/admin"
+                className="bg-[#1A1C43] border border-[#1A1C43] hover:bg-slate-800 text-white px-4 py-3 rounded-xl text-sm font-semibold transition flex items-center gap-2"
+              >
+                <ShieldCheck size={17} />
+                Admin Control Center
+              </Link>
+            )}
 
             {/* Account */}
 
@@ -752,7 +802,7 @@ export default function DashboardPage() {
         <div className="flex overflow-x-auto border-b border-slate-200 mb-6 space-x-8">
 
           <button
-            onClick={() => setActiveTab("overview")}
+            onClick={() => selectDashboardTab("overview")}
             className={`pb-3 whitespace-nowrap font-semibold text-sm flex items-center gap-2 transition border-b-2 cursor-pointer ${activeTab === "overview"
               ? "border-[#0D9488] text-[#0D9488]"
               : "border-transparent text-slate-500 hover:text-slate-800"
@@ -763,7 +813,7 @@ export default function DashboardPage() {
           </button>
 
           <button
-            onClick={() => setActiveTab("purchases")}
+            onClick={() => selectDashboardTab("purchases")}
             className={`pb-3 whitespace-nowrap font-semibold text-sm flex items-center gap-2 transition border-b-2 cursor-pointer ${activeTab === "purchases"
               ? "border-[#0D9488] text-[#0D9488]"
               : "border-transparent text-slate-500 hover:text-slate-800"
@@ -780,7 +830,7 @@ export default function DashboardPage() {
           </button>
 
           <button
-            onClick={() => setActiveTab("listings")}
+            onClick={() => selectDashboardTab("listings")}
             className={`pb-3 whitespace-nowrap font-semibold text-sm flex items-center gap-2 transition border-b-2 cursor-pointer ${activeTab === "listings"
               ? "border-[#0D9488] text-[#0D9488]"
               : "border-transparent text-slate-500 hover:text-slate-800"
@@ -791,7 +841,7 @@ export default function DashboardPage() {
           </button>
 
           <button
-            onClick={() => setActiveTab("analytics")}
+            onClick={() => selectDashboardTab("analytics")}
             className={`pb-3 whitespace-nowrap font-semibold text-sm flex items-center gap-2 transition border-b-2 cursor-pointer ${activeTab === "analytics"
               ? "border-[#0D9488] text-[#0D9488]"
               : "border-transparent text-slate-500 hover:text-slate-800"
@@ -826,7 +876,7 @@ export default function DashboardPage() {
               </div>
 
               <button
-                onClick={() => setActiveTab("listings")}
+                onClick={() => selectDashboardTab("listings")}
                 className="text-sm font-semibold text-[#0D9488] hover:underline cursor-pointer"
               >
                 View all
@@ -1042,12 +1092,10 @@ function PurchaseCard({
   formatDateTime,
 }: {
   purchase: Purchase;
-  formatDate: (date: string) => string;
+  formatDate: (date: string | null) => string;
   formatDateTime: (date: string) => string;
 }) {
-  function getOrderStatusStyle(
-    status: Purchase["status"]
-  ) {
+  function getOrderStatusStyle(status: string) {
     if (status === "CONFIRMED") {
       return "bg-emerald-50 text-emerald-700 border-emerald-200";
     }
@@ -1059,11 +1107,13 @@ function PurchaseCard({
     return "bg-amber-50 text-amber-700 border-amber-200";
   }
 
-  function getOrderStatusLabel(
-    status: Purchase["status"]
-  ) {
+  function getOrderStatusLabel(status: string) {
     if (status === "CONFIRMED") {
       return "Confirmed";
+    }
+
+    if (status === "COMPLETED") {
+      return "Completed";
     }
 
     if (status === "CANCELLED") {
@@ -1080,8 +1130,8 @@ function PurchaseCard({
       return "Card";
     }
 
-    if (paymentMethod === "MOBILE_BANKING") {
-      return "Mobile Banking";
+    if (paymentMethod && ["BKASH", "NAGAD", "ROCKET"].includes(paymentMethod)) {
+      return paymentMethod;
     }
 
     return "Not specified";
@@ -1102,43 +1152,41 @@ function PurchaseCard({
 
               <span
                 className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${getOrderStatusStyle(
-                  purchase.status
+                  purchase.orderStatus
                 )}`}
               >
                 {getOrderStatusLabel(
-                  purchase.status
+                  purchase.orderStatus
                 )}
               </span>
 
               <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">
-                {formatCategory(purchase.ticket.category)}
+                {formatCategory(purchase.ticket?.category)}
               </span>
 
             </div>
 
             <h3 className="mt-3 text-lg font-bold text-slate-900">
-              {purchase.ticket.title}
+              {purchase.ticket?.title || "Ticket details unavailable"}
             </h3>
 
             <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-slate-500">
 
               <span className="flex items-center gap-1.5">
                 <MapPin size={14} />
-                {purchase.ticket.from} →{" "}
-                {purchase.ticket.to}
+                {purchase.ticket?.from || "Origin unavailable"} →{" "}
+                {purchase.ticket?.to || "Destination unavailable"}
               </span>
 
               <span className="flex items-center gap-1.5">
                 <CalendarDays size={14} />
-                {formatDate(
-                  purchase.ticket.travelDate
-                )}
+                {formatDate(purchase.ticket?.travelDate || null)}
               </span>
 
-              {purchase.ticket.travelTime && (
+              {purchase.ticket?.travelTime && (
                 <span className="flex items-center gap-1.5">
                   <Clock3 size={14} />
-                  {purchase.ticket.travelTime}
+                  {purchase.ticket?.travelTime}
                 </span>
               )}
 
@@ -1153,7 +1201,7 @@ function PurchaseCard({
             </p>
 
             <p className="mt-1 text-2xl font-extrabold text-slate-900">
-              ৳ {purchase.totalAmount.toLocaleString()}
+              ৳ {Number(purchase.orderTotal || 0).toLocaleString()}
             </p>
 
             <p className="text-xs text-slate-400 mt-1">
@@ -1188,7 +1236,7 @@ function PurchaseCard({
             </p>
 
             <p className="mt-1 text-sm font-semibold text-slate-700">
-              ৳ {purchase.ticket.price.toLocaleString()}
+              ৳ {(purchase.ticket?.price || 0).toLocaleString()}
             </p>
           </div>
 
@@ -1224,7 +1272,7 @@ function PurchaseCard({
           <div className="text-xs text-slate-400">
             Seat:{" "}
             <span className="font-semibold text-slate-600">
-              {purchase.ticket.seatNumber ||
+              {purchase.ticket?.seatNumber ||
                 "Not specified"}
             </span>
           </div>
@@ -1255,7 +1303,8 @@ function ListingCard({
 }: {
   ticket: Listing;
 }) {
-  function formatDate(date: string) {
+  function formatDate(date: string | null) {
+    if (!date) return "Date not available";
     return new Date(date).toLocaleDateString("en-BD", {
       day: "numeric",
       month: "short",
@@ -1263,7 +1312,7 @@ function ListingCard({
     });
   }
 
-  function getStatusStyle(status: Listing["status"]) {
+  function getStatusStyle(status: Listing["ticketStatus"]) {
     if (status === "AVAILABLE") {
       return "bg-emerald-50 text-emerald-700 border-emerald-200";
     }
@@ -1275,7 +1324,7 @@ function ListingCard({
     return "bg-red-50 text-red-700 border-red-200";
   }
 
-  function getStatusLabel(status: Listing["status"]) {
+  function getStatusLabel(status: Listing["ticketStatus"]) {
     if (status === "AVAILABLE") {
       return "Active Listing";
     }
@@ -1300,10 +1349,10 @@ function ListingCard({
 
             <span
               className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${getStatusStyle(
-                ticket.status
+                ticket.ticketStatus
               )}`}
             >
-              {getStatusLabel(ticket.status)}
+              {getStatusLabel(ticket.ticketStatus)}
             </span>
 
             <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">
@@ -1320,7 +1369,7 @@ function ListingCard({
 
             <span className="flex items-center gap-1.5">
               <MapPin size={14} />
-              {ticket.from} → {ticket.to}
+              {ticket.from || "Origin unavailable"} → {ticket.to || "Destination unavailable"}
             </span>
 
             <span className="flex items-center gap-1.5">
@@ -1356,7 +1405,7 @@ function ListingCard({
             </p>
 
             <p className="text-xl font-extrabold text-slate-900">
-              ৳ {ticket.price.toLocaleString()}
+              ৳ {(ticket.price || 0).toLocaleString()}
             </p>
 
             {ticket.quantity > 1 && (
@@ -1416,5 +1465,19 @@ function EmptyListings() {
       </Link>
 
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-[#F8FAFC] flex items-center justify-center">
+          <Loader2 size={30} className="animate-spin text-[#0D9488]" />
+        </main>
+      }
+    >
+      <DashboardContent />
+    </Suspense>
   );
 }

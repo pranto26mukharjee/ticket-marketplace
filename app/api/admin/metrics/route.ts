@@ -34,7 +34,7 @@ export async function GET(request: Request) {
 
     const totalPlatformVolume = paidOrders.reduce((acc, o) => acc + (o.orderTotal || 0), 0);
     const totalEscrowHeld = paidOrders
-      .filter((o) => o.orderStatus === "CONFIRMED")
+      .filter((o) => o.orderStatus === "CONFIRMED" || o.orderStatus === "REFUND_REQUESTED")
       .reduce((acc, o) => acc + (o.orderTotal || 0), 0);
 
     // 2. Aggregate counts
@@ -46,6 +46,8 @@ export async function GET(request: Request) {
       totalOrders,
       openDisputes,
       openFraudAlerts,
+      pendingVerifications,
+      pendingPayments,
     ] = await Promise.all([
       prisma.user.count(),
       prisma.userProfile.count({ where: { identityVerified: true } }),
@@ -54,6 +56,8 @@ export async function GET(request: Request) {
       prisma.order.count(),
       prisma.dispute.count({ where: { disputeStatus: "OPEN" } }),
       prisma.fraudAlert.count({ where: { alertStatus: "OPEN" } }),
+      prisma.ticket.count({ where: { ticketStatus: "PENDING_REVIEW" } }),
+      prisma.order.count({ where: { orderStatus: "PAYMENT_SUBMITTED" } }),
     ]);
 
     // 3. Fetch Recent Transactions
@@ -103,6 +107,8 @@ export async function GET(request: Request) {
           totalOrders,
           openDisputes,
           openFraudAlerts,
+          pendingVerifications,
+          pendingPayments,
         },
         recentTransactions,
         recentAdminActions,

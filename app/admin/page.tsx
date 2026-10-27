@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { useCallback, useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -11,22 +11,31 @@ import {
   ShieldAlert,
   BarChart3,
   Search,
-  Filter,
   CheckCircle2,
-  AlertTriangle,
-  XCircle,
-  RotateCcw,
   ExternalLink,
-  Ban,
-  UserCheck,
-  UserX,
   Loader2,
-  Lock,
-  ArrowUpRight,
   LogOut,
   RefreshCw,
   FileText,
+  Database,
 } from "lucide-react";
+
+interface VerificationCheckItem {
+  key: string;
+  label: string;
+  status: "PASS" | "WARN" | "FAIL" | "SKIP";
+  detail: string;
+}
+
+function parseChecks(extractedData: string | null | undefined): VerificationCheckItem[] {
+  if (!extractedData) return [];
+  try {
+    const parsed = JSON.parse(extractedData);
+    return Array.isArray(parsed.checks) ? parsed.checks : [];
+  } catch {
+    return [];
+  }
+}
 
 interface MetricsData {
   totalPlatformVolume: number;
@@ -38,6 +47,8 @@ interface MetricsData {
   totalOrders: number;
   openDisputes: number;
   openFraudAlerts: number;
+  pendingVerifications?: number;
+  pendingPayments?: number;
 }
 
 interface UserItem {
@@ -80,6 +91,7 @@ interface TicketItem {
     decision: string | null;
     verificationStatus: string;
     documentUrl: string | null;
+    extractedData?: string | null;
   }>;
 }
 
@@ -108,6 +120,10 @@ interface OrderItem {
   payment?: {
     paymentStatus: string;
     gatewayReference: string | null;
+    trxId?: string | null;
+    senderNumber?: string | null;
+    submittedAt?: string | null;
+    reviewNote?: string | null;
   } | null;
   disputes?: Array<{
     id: string;
@@ -152,46 +168,74 @@ interface AuditLogItem {
   } | null;
 }
 
+interface AdminPagination {
+  page: number;
+  totalPages: number;
+  total: number;
+}
+
+const emptyPagination: AdminPagination = { page: 1, totalPages: 1, total: 0 };
+
 function AdminDashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialTab = searchParams.get("tab") || "overview";
+  const activeTab = searchParams.get("tab") || "overview";
 
-  const [activeTab, setActiveTab] = useState<string>(initialTab);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+  const [loadError, setLoadError] = useState("");
 
   // Data states
   const [metrics, setMetrics] = useState<MetricsData | null>(null);
   const [users, setUsers] = useState<UserItem[]>([]);
   const [tickets, setTickets] = useState<TicketItem[]>([]);
   const [orders, setOrders] = useState<OrderItem[]>([]);
+  const [userPagination, setUserPagination] = useState(emptyPagination);
+  const [ticketPagination, setTicketPagination] = useState(emptyPagination);
+  const [orderPagination, setOrderPagination] = useState(emptyPagination);
   const [fraudAlerts, setFraudAlerts] = useState<FraudAlertItem[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditPagination, setAuditPagination] = useState(emptyPagination);
 
   // Filter states
   const [userSearch, setUserSearch] = useState("");
+  const [appliedUserSearch, setAppliedUserSearch] = useState("");
   const [userRoleFilter, setUserRoleFilter] = useState("ALL");
+  const [userStatusFilter, setUserStatusFilter] = useState("ALL");
+  const [userPage, setUserPage] = useState(1);
   const [ticketSearch, setTicketSearch] = useState("");
+  const [appliedTicketSearch, setAppliedTicketSearch] = useState("");
+  const [ticketStatusFilter, setTicketStatusFilter] = useState("ALL");
+  const [ticketPage, setTicketPage] = useState(1);
+  const [orderStatusFilter, setOrderStatusFilter] = useState("ALL");
+  const [orderPage, setOrderPage] = useState(1);
 
   // 1. Initial auth & metric load
-  const loadAllData = async () => {
+  const loadAllData = useCallback(async () => {
     try {
       setRefreshing(true);
+      setLoadError("");
 
       const [metricsRes, usersRes, ticketsRes, ordersRes, fraudRes, auditRes] = await Promise.all([
         fetch("/api/admin/metrics"),
-        fetch(`/api/admin/users?search=${encodeURIComponent(userSearch)}&role=${userRoleFilter}`),
-        fetch(`/api/admin/tickets?search=${encodeURIComponent(ticketSearch)}`),
-        fetch("/api/admin/orders"),
+        fetch(`/api/admin/users?search=${encodeURIComponent(appliedUserSearch)}&role=${userRoleFilter}&status=${userStatusFilter}&page=${userPage}`),
+        fetch(`/api/admin/tickets?search=${encodeURIComponent(appliedTicketSearch)}&status=${ticketStatusFilter}&page=${ticketPage}`),
+        fetch(`/api/admin/orders?status=${orderStatusFilter}&page=${orderPage}`),
         fetch("/api/admin/fraud"),
-        fetch("/api/admin/audit"),
+        fetch(`/api/admin/audit?page=${auditPage}`),
       ]);
 
-      if (metricsRes.status === 401 || metricsRes.status === 403) {
+      const responses = [metricsRes, usersRes, ticketsRes, ordersRes, fraudRes, auditRes];
+      if (responses.some((response) => response.status === 401 || response.status === 403)) {
         router.push("/admin/login");
         return;
+      }
+
+      const failedResponse = responses.find((response) => !response.ok);
+      if (failedResponse) {
+        throw new Error(`Admin data request failed (${failedResponse.status}). Refresh and try again.`);
       }
 
       const [metricsData, usersData, ticketsData, ordersData, fraudData, auditData] = await Promise.all([
@@ -207,22 +251,66 @@ function AdminDashboardContent() {
       if (usersData.success) setUsers(usersData.users || []);
       if (ticketsData.success) setTickets(ticketsData.tickets || []);
       if (ordersData.success) setOrders(ordersData.orders || []);
+      if (usersData.pagination) {
+        setUserPagination({
+          page: usersData.pagination.page,
+          totalPages: usersData.pagination.totalPages,
+          total: usersData.pagination.totalUsers,
+        });
+      }
+      if (ticketsData.pagination) {
+        setTicketPagination({
+          page: ticketsData.pagination.page,
+          totalPages: ticketsData.pagination.totalPages,
+          total: ticketsData.pagination.totalTickets,
+        });
+      }
+      if (ordersData.pagination) {
+        setOrderPagination({
+          page: ordersData.pagination.page,
+          totalPages: ordersData.pagination.totalPages,
+          total: ordersData.pagination.totalOrders,
+        });
+      }
       if (fraudData.success) setFraudAlerts(fraudData.alerts || []);
       if (auditData.success) setAuditLogs(auditData.auditLogs || []);
+      if (auditData.pagination) {
+        setAuditPagination({
+          page: auditData.pagination.page,
+          totalPages: auditData.pagination.totalPages,
+          total: auditData.pagination.totalAuditLogs,
+        });
+      }
     } catch (err) {
       console.error("Failed to load admin data:", err);
+      setLoadError(err instanceof Error ? err.message : "Failed to load admin data.");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [appliedTicketSearch, appliedUserSearch, auditPage, orderPage, orderStatusFilter, router, ticketPage, ticketStatusFilter, userPage, userRoleFilter, userStatusFilter]);
 
   useEffect(() => {
-    loadAllData();
-  }, [userRoleFilter]);
+    void Promise.resolve().then(() => loadAllData());
+  }, [loadAllData]);
+
+  const selectAdminTab = (tab: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", tab);
+    router.replace(`/admin?${params.toString()}`, { scroll: false });
+  };
 
   // 2. User Moderation Handlers
   const handleUserAction = async (userId: string, action: string, payload: Record<string, unknown>) => {
+    const confirmation = action === "VERIFY_KYC"
+      ? `${payload.identityVerified ? "Approve" : "Revoke"} identity verification for this user?`
+      : action === "UPDATE_ROLE"
+      ? `Change this account role to ${String(payload.role)}?`
+      : action === "UPDATE_STATUS" && payload.accountStatus !== "ACTIVE"
+      ? `Set this account to ${String(payload.accountStatus)}?`
+      : "";
+    if (confirmation && !window.confirm(confirmation)) return;
+
     try {
       const res = await fetch("/api/admin/users", {
         method: "PATCH",
@@ -233,7 +321,7 @@ function AdminDashboardContent() {
       if (!res.ok) throw new Error(data.message || "Failed to update user.");
 
       setStatusMessage(data.message);
-      loadAllData();
+      await loadAllData();
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "Error performing user action");
     }
@@ -241,26 +329,43 @@ function AdminDashboardContent() {
 
   // 3. Ticket Moderation Handlers
   const handleTicketAction = async (ticketId: string, action: string) => {
+    let note = "";
+    if (["SUSPEND", "REJECT_AI"].includes(action)) {
+      const reason = window.prompt(`Reason for ${action === "SUSPEND" ? "suspending" : "rejecting"} this listing (sent to the seller):`);
+      if (reason === null) return;
+      note = reason.trim();
+    }
+
     try {
       const res = await fetch("/api/admin/tickets", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticketId, action }),
+        body: JSON.stringify({ ticketId, action, note }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Failed to moderate ticket.");
 
       setStatusMessage(data.message);
-      loadAllData();
+      await loadAllData();
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "Error moderating ticket");
     }
   };
 
   // 4. Order Escrow Handlers
-  const handleOrderAction = async (orderId: string, action: string, notes = "") => {
-    if (!confirm(`Are you sure you want to execute ${action} on order #${orderId.slice(-6)}?`)) {
-      return;
+  const handleOrderAction = async (orderId: string, action: string) => {
+    let notes = "";
+    if (action === "APPROVE_PAYMENT") {
+      if (!confirm(`Confirm that the money for order #${orderId.slice(-6)} has arrived in the merchant wallet?`)) return;
+    } else {
+      const label: Record<string, string> = {
+        REJECT_PAYMENT: "Why is this payment being rejected? (shown to the buyer, required)",
+        FORCE_REFUND: "Refund note (shown to both parties):",
+        FORCE_COMPLETE: "Release note (shown to both parties):",
+      };
+      const reason = window.prompt(label[action] || `Notes for ${action}:`);
+      if (reason === null) return;
+      notes = reason.trim();
     }
 
     try {
@@ -273,7 +378,7 @@ function AdminDashboardContent() {
       if (!res.ok) throw new Error(data.message || "Failed to process order moderation.");
 
       setStatusMessage(data.message);
-      loadAllData();
+      await loadAllData();
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "Error processing order moderation");
     }
@@ -281,6 +386,8 @@ function AdminDashboardContent() {
 
   // 5. Fraud Alert Handlers
   const handleFraudAction = async (alertId: string, action: string) => {
+    if (!window.confirm(`${action === "DISMISS" ? "Dismiss" : "Resolve"} this fraud alert?`)) return;
+
     try {
       const res = await fetch("/api/admin/fraud", {
         method: "PATCH",
@@ -291,7 +398,7 @@ function AdminDashboardContent() {
       if (!res.ok) throw new Error(data.message || "Failed to update alert.");
 
       setStatusMessage(data.message);
-      loadAllData();
+      await loadAllData();
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "Error updating fraud alert");
     }
@@ -334,13 +441,21 @@ function AdminDashboardContent() {
 
           <div className="flex items-center gap-3">
             <button
-              onClick={loadAllData}
+              onClick={() => { void loadAllData(); }}
               disabled={refreshing}
               className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 transition text-xs flex items-center gap-1.5 cursor-pointer"
             >
               <RefreshCw size={14} className={refreshing ? "animate-spin text-teal-400" : ""} />
               <span className="hidden sm:inline">Refresh</span>
             </button>
+
+            <Link
+              href="/admin/database"
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition flex items-center gap-1"
+            >
+              <Database size={12} />
+              <span className="hidden sm:inline">Database</span>
+            </Link>
 
             <Link
               href="/"
@@ -366,17 +481,17 @@ function AdminDashboardContent() {
           {[
             { id: "overview", label: "Overview & Analytics", icon: BarChart3 },
             { id: "users", label: `User Management (${metrics?.totalUsers || 0})`, icon: Users },
-            { id: "tickets", label: `Listing Moderation (${metrics?.totalTickets || 0})`, icon: Ticket },
-            { id: "orders", label: `Escrow & Orders (${metrics?.totalOrders || 0})`, icon: ShoppingBag },
+            { id: "tickets", label: `Listing Moderation (${metrics?.pendingVerifications ? `${metrics.pendingVerifications} to review` : metrics?.totalTickets || 0})`, icon: Ticket },
+            { id: "orders", label: `Escrow & Orders (${metrics?.pendingPayments ? `${metrics.pendingPayments} payments to verify` : metrics?.totalOrders || 0})`, icon: ShoppingBag },
             { id: "fraud", label: `Fraud Flags (${metrics?.openFraudAlerts || 0})`, icon: ShieldAlert },
-            { id: "audit", label: `Audit Ledger (${auditLogs.length})`, icon: FileText },
+            { id: "audit", label: `Audit Ledger (${auditPagination.total})`, icon: FileText },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => selectAdminTab(tab.id)}
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
                   isActive
                     ? "bg-teal-500 text-slate-950 shadow-md shadow-teal-500/20"
@@ -402,6 +517,15 @@ function AdminDashboardContent() {
             <button onClick={() => setStatusMessage("")} className="text-teal-400 hover:text-white">
               ✕
             </button>
+          </div>
+        </div>
+      )}
+
+      {loadError && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 mt-4">
+          <div role="alert" className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-300 flex items-center justify-between gap-3">
+            <span>{loadError}</span>
+            <button onClick={() => { void loadAllData(); }} className="font-bold hover:text-white">Retry</button>
           </div>
         </div>
       )}
@@ -480,7 +604,7 @@ function AdminDashboardContent() {
                     <span>Recent Escrow Transactions</span>
                   </h3>
                   <button
-                    onClick={() => setActiveTab("orders")}
+                    onClick={() => selectAdminTab("orders")}
                     className="text-xs text-teal-400 hover:underline cursor-pointer"
                   >
                     View All →
@@ -518,7 +642,7 @@ function AdminDashboardContent() {
                     <span>Fraud & Risk Monitoring</span>
                   </h3>
                   <button
-                    onClick={() => setActiveTab("fraud")}
+                    onClick={() => selectAdminTab("fraud")}
                     className="text-xs text-rose-400 hover:underline cursor-pointer"
                   >
                     View All Flags →
@@ -574,7 +698,13 @@ function AdminDashboardContent() {
                   placeholder="Search by name, email, phone..."
                   value={userSearch}
                   onChange={(e) => setUserSearch(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && loadAllData()}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      setAppliedUserSearch(userSearch.trim());
+                      setUserPage(1);
+                    }
+                  }}
                   className="w-full pl-10 pr-4 py-2 bg-[#101226] border border-slate-700/80 rounded-xl text-xs text-white outline-none focus:border-teal-500"
                 />
               </div>
@@ -582,7 +712,7 @@ function AdminDashboardContent() {
               <div className="flex items-center gap-3 w-full sm:w-auto">
                 <select
                   value={userRoleFilter}
-                  onChange={(e) => setUserRoleFilter(e.target.value)}
+                  onChange={(e) => { setUserRoleFilter(e.target.value); setUserPage(1); }}
                   className="bg-[#101226] border border-slate-700/80 text-xs text-slate-300 rounded-xl px-3 py-2 outline-none"
                 >
                   <option value="ALL">All Roles</option>
@@ -591,8 +721,20 @@ function AdminDashboardContent() {
                   <option value="ADMIN">Admins</option>
                 </select>
 
+                <select
+                  aria-label="Filter users by account status"
+                  value={userStatusFilter}
+                  onChange={(e) => { setUserStatusFilter(e.target.value); setUserPage(1); }}
+                  className="bg-[#101226] border border-slate-700/80 text-xs text-slate-300 rounded-xl px-3 py-2 outline-none"
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="ACTIVE">Active</option>
+                  <option value="SUSPENDED">Suspended</option>
+                  <option value="BANNED">Banned</option>
+                </select>
+
                 <button
-                  onClick={loadAllData}
+                  onClick={() => { setAppliedUserSearch(userSearch.trim()); setUserPage(1); }}
                   className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white font-bold rounded-xl text-xs transition cursor-pointer"
                 >
                   Search
@@ -631,17 +773,16 @@ function AdminDashboardContent() {
                           </td>
 
                           <td className="p-4">
-                            <span
-                              className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                                user.role === "ADMIN"
-                                  ? "bg-purple-500/20 text-purple-300 border border-purple-500/30"
-                                  : user.role === "SELLER"
-                                  ? "bg-blue-500/20 text-blue-300 border border-blue-500/30"
-                                  : "bg-slate-700/60 text-slate-300"
-                              }`}
+                            <select
+                              aria-label={`Change role for ${user.email}`}
+                              value={user.role}
+                              onChange={(event) => handleUserAction(user.id, "UPDATE_ROLE", { role: event.target.value })}
+                              className={`px-2.5 py-1 rounded-full text-[10px] font-bold bg-[#101226] border border-slate-700 text-slate-200 outline-none ${user.role === "ADMIN" ? "border-purple-500/50 text-purple-300" : ""}`}
                             >
-                              {user.role}
-                            </span>
+                              <option value="BUYER">BUYER</option>
+                              <option value="SELLER">SELLER</option>
+                              <option value="ADMIN">ADMIN</option>
+                            </select>
                           </td>
 
                           <td className="p-4">
@@ -724,10 +865,14 @@ function AdminDashboardContent() {
                         </tr>
                       );
                     })}
+                    {users.length === 0 && (
+                      <tr><td colSpan={6} className="p-8 text-center text-slate-500">No users match these filters.</td></tr>
+                    )}
                   </tbody>
                 </table>
               </div>
             </div>
+            <AdminPagination pagination={userPagination} onPageChange={setUserPage} />
           </div>
         )}
 
@@ -736,6 +881,35 @@ function AdminDashboardContent() {
         ======================================================== */}
         {activeTab === "tickets" && (
           <div className="space-y-4">
+            <form
+              onSubmit={(event) => { event.preventDefault(); setAppliedTicketSearch(ticketSearch.trim()); setTicketPage(1); }}
+              className="bg-[#181A38] p-4 rounded-2xl border border-slate-800 flex flex-col sm:flex-row gap-3"
+            >
+              <div className="relative flex-1">
+                <Search size={16} className="absolute left-3.5 top-3 text-slate-500" />
+                <input
+                  value={ticketSearch}
+                  onChange={(event) => setTicketSearch(event.target.value)}
+                  placeholder="Search title, route, or seller..."
+                  className="w-full pl-10 pr-4 py-2 bg-[#101226] border border-slate-700/80 rounded-xl text-xs text-white outline-none focus:border-teal-500"
+                />
+              </div>
+              <select
+                aria-label="Filter listings by status"
+                value={ticketStatusFilter}
+                onChange={(event) => { setTicketStatusFilter(event.target.value); setTicketPage(1); }}
+                className="bg-[#101226] border border-slate-700/80 text-xs text-slate-300 rounded-xl px-3 py-2 outline-none"
+              >
+                <option value="ALL">All Listing Statuses</option>
+                <option value="PENDING_REVIEW">Needs review</option>
+                <option value="REJECTED">Rejected</option>
+                <option value="AVAILABLE">Available</option>
+                <option value="SUSPENDED">Suspended</option>
+                <option value="PAUSED">Paused</option>
+                <option value="CANCELLED">Cancelled</option>
+              </select>
+              <button type="submit" className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white font-bold rounded-xl text-xs">Apply</button>
+            </form>
             <div className="bg-[#181A38] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs text-slate-300">
@@ -753,7 +927,9 @@ function AdminDashboardContent() {
                   <tbody className="divide-y divide-slate-800/80">
                     {tickets.map((t) => {
                       const ver = t.verifications?.[0];
-                      const score = ver?.aiConfidenceScore ?? 80;
+                      const score = ver?.aiConfidenceScore == null ? null : Math.round(ver.aiConfidenceScore * 100);
+                      const checks = parseChecks(ver?.extractedData);
+                      const flagged = checks.filter((c) => c.status === "FAIL" || c.status === "WARN");
 
                       return (
                         <tr key={t.id} className="hover:bg-slate-800/40 transition">
@@ -777,15 +953,33 @@ function AdminDashboardContent() {
                           <td className="p-4">
                             <span
                               className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                score >= 85
+                                ver?.verificationStatus === "VERIFIED"
                                   ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                                  : score >= 60
+                                  : ver?.verificationStatus === "UNDER_REVIEW"
                                   ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
                                   : "bg-red-500/20 text-red-300 border border-red-500/30"
                               }`}
                             >
-                              {score}% {ver?.decision || "AI SCREEN"}
+                              {ver?.verificationStatus || "UNVERIFIED"}{score !== null ? ` · ${score}%` : ""}
                             </span>
+                            {checks.length > 0 && (
+                              <details className="mt-1.5 max-w-xs">
+                                <summary className="cursor-pointer text-[10px] text-slate-400 hover:text-white">
+                                  {flagged.length ? `${flagged.length} issue(s) of ${checks.length} checks` : `${checks.length} checks passed`}
+                                </summary>
+                                <ul className="mt-1 space-y-1">
+                                  {checks.map((c) => (
+                                    <li key={c.key} className="text-[10px] leading-snug">
+                                      <span className={c.status === "PASS" ? "text-emerald-400" : c.status === "WARN" ? "text-amber-400" : c.status === "FAIL" ? "text-red-400" : "text-slate-500"}>
+                                        {c.status}
+                                      </span>{" "}
+                                      <span className="text-slate-300 font-semibold">{c.label}:</span>{" "}
+                                      <span className="text-slate-400">{c.detail}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </details>
+                            )}
                           </td>
 
                           <td className="p-4">
@@ -809,7 +1003,7 @@ function AdminDashboardContent() {
                               className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
                                 t.ticketStatus === "AVAILABLE"
                                   ? "bg-emerald-500/20 text-emerald-300"
-                                  : t.ticketStatus === "SUSPENDED"
+                                  : t.ticketStatus === "SUSPENDED" || t.ticketStatus === "PENDING_REVIEW"
                                   ? "bg-amber-500/20 text-amber-300"
                                   : "bg-red-500/20 text-red-300"
                               }`}
@@ -820,7 +1014,15 @@ function AdminDashboardContent() {
 
                           <td className="p-4 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              {t.ticketStatus === "AVAILABLE" ? (
+                              {ver?.verificationStatus !== "VERIFIED" && (
+                                <button
+                                  onClick={() => handleTicketAction(t.id, "APPROVE_AI")}
+                                  className="px-2.5 py-1 bg-teal-500/20 hover:bg-teal-500/30 text-teal-200 rounded-lg text-[11px] font-semibold transition cursor-pointer"
+                                >
+                                  Approve
+                                </button>
+                              )}
+                              {["PENDING_REVIEW", "REJECTED"].includes(t.ticketStatus) ? null : t.ticketStatus === "AVAILABLE" ? (
                                 <button
                                   onClick={() => handleTicketAction(t.id, "SUSPEND")}
                                   className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded-lg text-[11px] font-semibold transition cursor-pointer"
@@ -832,7 +1034,7 @@ function AdminDashboardContent() {
                                   onClick={() => handleTicketAction(t.id, "ACTIVATE")}
                                   className="px-2.5 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 rounded-lg text-[11px] font-semibold transition cursor-pointer"
                                 >
-                                  Approve
+                                  Activate
                                 </button>
                               )}
                               <button
@@ -846,10 +1048,14 @@ function AdminDashboardContent() {
                         </tr>
                       );
                     })}
+                    {tickets.length === 0 && (
+                      <tr><td colSpan={7} className="p-8 text-center text-slate-500">No listings match these filters.</td></tr>
+                    )}
                   </tbody>
                 </table>
               </div>
             </div>
+            <AdminPagination pagination={ticketPagination} onPageChange={setTicketPage} />
           </div>
         )}
 
@@ -858,6 +1064,22 @@ function AdminDashboardContent() {
         ======================================================== */}
         {activeTab === "orders" && (
           <div className="space-y-4">
+            <div className="flex justify-end">
+              <select
+                aria-label="Filter orders by status"
+                value={orderStatusFilter}
+                onChange={(event) => { setOrderStatusFilter(event.target.value); setOrderPage(1); }}
+                className="bg-[#181A38] border border-slate-700 text-xs text-slate-200 rounded-xl px-3 py-2 outline-none"
+              >
+                <option value="ALL">All Order Statuses</option>
+                <option value="PAYMENT_SUBMITTED">Payment to verify</option>
+                <option value="PENDING">Awaiting payment</option>
+                <option value="CONFIRMED">Confirmed</option>
+                <option value="COMPLETED">Completed</option>
+                <option value="CANCELLED">Cancelled</option>
+                <option value="REFUND_REQUESTED">Refund Requested</option>
+              </select>
+            </div>
             <div className="bg-[#181A38] rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs text-slate-300">
@@ -914,11 +1136,16 @@ function AdminDashboardContent() {
                             >
                               {o.payment?.paymentStatus || "PENDING"}
                             </span>
-                            {o.payment?.gatewayReference && (
-                              <div className="mt-1.5 flex items-center gap-1 font-mono text-[10px] text-teal-300 bg-slate-900/90 border border-teal-500/30 px-2 py-0.5 rounded-md w-fit">
-                                <span className="text-slate-400">TrxID:</span>
-                                <span className="font-bold text-white select-all">{o.payment.gatewayReference}</span>
+                            {o.payment?.trxId && (
+                              <div className="mt-1.5 space-y-0.5 font-mono text-[10px] text-teal-300 bg-slate-900/90 border border-teal-500/30 px-2 py-1 rounded-md w-fit">
+                                <div><span className="text-slate-400">TrxID:</span> <span className="font-bold text-white select-all">{o.payment.trxId}</span></div>
+                                {o.payment.senderNumber && (
+                                  <div><span className="text-slate-400">From:</span> <span className="text-white select-all">{o.payment.senderNumber}</span></div>
+                                )}
                               </div>
+                            )}
+                            {o.payment?.reviewNote && (
+                              <p className="mt-1 text-[10px] text-slate-400 max-w-[200px]">Note: {o.payment.reviewNote}</p>
                             )}
                             {hasDispute && (
                               <span className="block mt-1 text-[10px] text-rose-400 font-bold">
@@ -945,13 +1172,21 @@ function AdminDashboardContent() {
 
                           <td className="p-4 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              {o.payment?.paymentStatus !== "PAID" && o.orderStatus !== "CANCELLED" && (
-                                <button
-                                  onClick={() => handleOrderAction(o.id, "APPROVE_PAYMENT")}
-                                  className="px-2.5 py-1 bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 border border-teal-500/40 rounded-lg text-[11px] font-semibold transition cursor-pointer"
-                                >
-                                  Approve Payment
-                                </button>
+                              {o.orderStatus === "PAYMENT_SUBMITTED" && (
+                                <>
+                                  <button
+                                    onClick={() => handleOrderAction(o.id, "APPROVE_PAYMENT")}
+                                    className="px-2.5 py-1 bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 border border-teal-500/40 rounded-lg text-[11px] font-semibold transition cursor-pointer"
+                                  >
+                                    Approve Payment
+                                  </button>
+                                  <button
+                                    onClick={() => handleOrderAction(o.id, "REJECT_PAYMENT")}
+                                    className="px-2.5 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-lg text-[11px] font-semibold transition cursor-pointer"
+                                  >
+                                    Reject
+                                  </button>
+                                </>
                               )}
                               {o.orderStatus === "CONFIRMED" || o.orderStatus === "REFUND_REQUESTED" ? (
                                 <>
@@ -978,10 +1213,14 @@ function AdminDashboardContent() {
                         </tr>
                       );
                     })}
+                    {orders.length === 0 && (
+                      <tr><td colSpan={7} className="p-8 text-center text-slate-500">No orders match this status.</td></tr>
+                    )}
                   </tbody>
                 </table>
               </div>
             </div>
+            <AdminPagination pagination={orderPagination} onPageChange={setOrderPage} />
           </div>
         )}
 
@@ -1090,7 +1329,7 @@ function AdminDashboardContent() {
                   </p>
                 </div>
                 <span className="text-xs font-mono font-bold text-teal-400 bg-teal-500/10 border border-teal-500/20 px-3 py-1 rounded-xl">
-                  {auditLogs.length} Logged Interventions
+                  {auditPagination.total} Logged Interventions
                 </span>
               </div>
 
@@ -1158,6 +1397,7 @@ function AdminDashboardContent() {
                 </table>
               </div>
             </div>
+            <AdminPagination pagination={auditPagination} onPageChange={setAuditPage} />
           </div>
         )}
       </main>
@@ -1176,5 +1416,39 @@ export default function AdminDashboardPage() {
     >
       <AdminDashboardContent />
     </Suspense>
+  );
+}
+
+function AdminPagination({
+  pagination,
+  onPageChange,
+}: {
+  pagination: AdminPagination;
+  onPageChange: (page: number) => void;
+}) {
+  if (pagination.total === 0) return null;
+
+  return (
+    <nav aria-label="Table pagination" className="flex items-center justify-between gap-3 text-xs text-slate-400">
+      <span>Page {pagination.page} of {pagination.totalPages} · {pagination.total} records</span>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onPageChange(pagination.page - 1)}
+          disabled={pagination.page <= 1}
+          className="px-3 py-2 border border-slate-700 rounded-lg text-slate-200 disabled:opacity-40"
+        >
+          Previous
+        </button>
+        <button
+          type="button"
+          onClick={() => onPageChange(pagination.page + 1)}
+          disabled={pagination.page >= pagination.totalPages}
+          className="px-3 py-2 border border-slate-700 rounded-lg text-slate-200 disabled:opacity-40"
+        >
+          Next
+        </button>
+      </div>
+    </nav>
   );
 }

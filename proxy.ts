@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
-
-const secret = new TextEncoder().encode(
-  process.env.JWT_SECRET || "ticketlagbe-super-secret-key-2026"
-);
+import { AUTH_COOKIE_NAME, getJwtSecretKey } from "@/lib/jwt-secret";
 
 // Pages that can be visited without logging in
 const publicExactRoutes = [
@@ -12,12 +9,14 @@ const publicExactRoutes = [
   "/login",
   "/signup",
   "/forgot-password",
-  "/reset-password",
   "/tickets",
   "/admin/login",
+  "/how-it-works",
 ];
 
-export async function middleware(request: NextRequest) {
+// Optimistic check only: API routes re-validate the user (role and ban status)
+// against the database on every request.
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Ignore static assets, Next.js internal chunks, images, icons
@@ -34,16 +33,13 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Allow public dynamic ticket viewing (/tickets/[id] and /verification-result)
-  if (
-    pathname.startsWith("/tickets/") ||
-    pathname.startsWith("/verification-result")
-  ) {
+  // Allow public ticket viewing (/tickets/[id]), but not the seller edit page
+  if (pathname.startsWith("/tickets/") && !pathname.endsWith("/edit")) {
     return NextResponse.next();
   }
 
   // Check login cookie
-  const token = request.cookies.get("ticketlagbe_token")?.value;
+  const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
 
   if (!token) {
     // If trying to access admin backoffice without login, send to admin login
@@ -60,7 +56,7 @@ export async function middleware(request: NextRequest) {
 
   // Verify token
   try {
-    const { payload } = await jwtVerify(token, secret);
+    const { payload } = await jwtVerify(token, getJwtSecretKey());
     const role = (payload.role as string) || "BUYER";
 
     // Role-based protection for /admin routes
@@ -83,7 +79,7 @@ export async function middleware(request: NextRequest) {
     loginUrl.searchParams.set("redirect", fullPath);
 
     const response = NextResponse.redirect(loginUrl);
-    response.cookies.delete("ticketlagbe_token");
+    response.cookies.delete(AUTH_COOKIE_NAME);
     return response;
   }
 }
@@ -91,7 +87,7 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Run middleware on all application pages except API and static assets
+     * Run on all application pages except API and static assets
      */
     "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],

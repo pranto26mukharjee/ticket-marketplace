@@ -2,6 +2,7 @@
 
 import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   Bell,
   CheckCheck,
@@ -12,7 +13,6 @@ import {
   MessageSquare,
   Ticket,
   Search,
-  Filter,
   Loader2,
   ArrowLeft,
   Check,
@@ -27,10 +27,14 @@ interface NotificationItem {
 }
 
 function NotificationsContent() {
+  const searchParams = useSearchParams();
+  const initialFilter = searchParams.get("filter");
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<"ALL" | "UNREAD" | "ORDERS" | "INQUIRIES">("ALL");
+  const [filter, setFilter] = useState<"ALL" | "UNREAD" | "ORDERS" | "INQUIRIES">(
+    initialFilter === "INQUIRIES" ? "INQUIRIES" : "ALL"
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
@@ -52,7 +56,7 @@ function NotificationsContent() {
   };
 
   useEffect(() => {
-    fetchNotifications();
+    void Promise.resolve().then(() => fetchNotifications());
   }, []);
 
   const handleMarkAllRead = async () => {

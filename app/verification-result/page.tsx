@@ -5,18 +5,46 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   ShieldCheck,
-  CheckCircle2,
   ArrowRight,
-  RefreshCw,
   Loader2,
   AlertCircle,
   Clock,
   Sparkles,
-  Ticket,
-  Calendar,
-  MapPin,
   XCircle,
+  CheckCircle2,
+  AlertTriangle,
+  MinusCircle,
 } from "lucide-react";
+
+interface VerificationCheck {
+  key: string;
+  label: string;
+  status: "PASS" | "WARN" | "FAIL" | "SKIP";
+  detail: string;
+}
+
+interface StoredVerificationData {
+  engine?: "claude" | "rules-only";
+  aiError?: string;
+  checks?: VerificationCheck[];
+  extraction?: { documentType?: string; issuer?: string | null } | null;
+}
+
+function parseStoredVerification(raw: string | null | undefined): StoredVerificationData {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as StoredVerificationData;
+  } catch {
+    return {};
+  }
+}
+
+const CHECK_STYLES = {
+  PASS: { icon: CheckCircle2, className: "text-emerald-600" },
+  WARN: { icon: AlertTriangle, className: "text-amber-500" },
+  FAIL: { icon: XCircle, className: "text-red-500" },
+  SKIP: { icon: MinusCircle, className: "text-slate-400" },
+} as const;
 
 interface TicketVerificationData {
   id: string;
@@ -47,8 +75,10 @@ function VerificationResultContent() {
 
   useEffect(() => {
     if (!ticketId) {
-      setError("Ticket ID is required to inspect verification result.");
-      setLoading(false);
+      void Promise.resolve().then(() => {
+        setError("Ticket ID is required to inspect verification result.");
+        setLoading(false);
+      });
       return;
     }
 
@@ -81,7 +111,7 @@ function VerificationResultContent() {
         <div className="flex flex-col items-center gap-3">
           <Loader2 size={36} className="animate-spin text-[#0D9488]" />
           <p className="text-sm font-semibold text-slate-500">
-            Running optical validation & duplicate screening...
+            Loading listing check results...
           </p>
         </div>
       </main>
@@ -108,12 +138,15 @@ function VerificationResultContent() {
 
   const verification = ticket.verifications?.[0];
   const status = verification?.verificationStatus || "PENDING";
-  const confidenceScore = Math.round((verification?.aiConfidenceScore || 0.85) * 100);
+  const confidenceScore = verification?.aiConfidenceScore == null
+    ? null
+    : Math.round(verification.aiConfidenceScore * 100);
+
+  const stored = parseStoredVerification(verification?.extractedData);
+  const checks = stored.checks ?? [];
 
   const isVerified = status === "VERIFIED";
   const isUnderReview = status === "UNDER_REVIEW" || status === "PENDING";
-  const isRejected = status === "REJECTED";
-
   return (
     <main className="min-h-screen bg-[#F8FAFC] text-slate-800 py-12 px-4">
       <div className="max-w-2xl mx-auto space-y-8">
@@ -147,18 +180,18 @@ function VerificationResultContent() {
             }`}
           >
             {isVerified
-              ? "AI Verification Passed • Live on Marketplace"
+              ? "Automated listing checks passed"
               : isUnderReview
-              ? "Automated Check Complete • Manual Review Pending"
-              : "AI Verification Failed • Listing Rejected"}
+              ? "Manual review pending"
+              : "Listing checks did not pass"}
           </span>
 
           <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">
             {isVerified
-              ? "Your Ticket has been Verified Genuine!"
+              ? "Required listing checks passed"
               : isUnderReview
-              ? "Your Ticket is Under Administrative Review"
-              : "Ticket Listing Could Not be Approved"}
+              ? "Your listing is awaiting administrator review"
+              : "Your listing could not be approved"}
           </h1>
 
           <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto">
@@ -175,26 +208,51 @@ function VerificationResultContent() {
               <Sparkles size={18} className="text-[#0D9488]" />
               <div>
                 <span className="font-bold text-slate-900 text-xs block">
-                  AI Authenticity Confidence Score
+                  {stored.engine === "claude" ? "AI document verification score" : "Screening score"}
                 </span>
                 <span className="text-[11px] text-slate-400">
-                  Checked against national carrier registries
+                  {stored.engine === "claude"
+                    ? `AI read your PDF${stored.extraction?.documentType ? ` (${stored.extraction.documentType})` : ""} and compared it with the listing.`
+                    : "AI analysis was unavailable; an admin will inspect the PDF manually."}
                 </span>
               </div>
             </div>
 
             <span
               className={`text-xl font-black ${
-                confidenceScore >= 80
+                confidenceScore !== null && confidenceScore >= 80
                   ? "text-emerald-600"
-                  : confidenceScore >= 60
+                  : confidenceScore !== null && confidenceScore >= 60
                   ? "text-amber-600"
                   : "text-red-600"
               }`}
             >
-              {confidenceScore}%
+              {confidenceScore === null ? "Not recorded" : `${confidenceScore}%`}
             </span>
           </div>
+
+          {checks.length > 0 && (
+            <div className="space-y-2 text-xs">
+              <h3 className="font-extrabold text-slate-900 uppercase tracking-wider text-[11px] border-b border-slate-100 pb-2">
+                Verification checks
+              </h3>
+              <ul className="space-y-2">
+                {checks.map((check) => {
+                  const style = CHECK_STYLES[check.status] ?? CHECK_STYLES.SKIP;
+                  const Icon = style.icon;
+                  return (
+                    <li key={check.key} className="flex gap-2.5">
+                      <Icon size={16} className={`${style.className} shrink-0 mt-0.5`} />
+                      <div>
+                        <span className="font-bold text-slate-900">{check.label}</span>
+                        <p className="text-slate-500 leading-relaxed">{check.detail}</p>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
 
           {/* Ticket Information Breakdown */}
           <div className="space-y-3 text-xs">
@@ -238,14 +296,18 @@ function VerificationResultContent() {
             </div>
           </div>
 
-          {/* Guarantee Box */}
+          {/* Payment Notice */}
           <div className="p-4 bg-teal-50/60 border border-teal-100 rounded-2xl text-[11px] text-teal-800 space-y-1">
             <div className="flex items-center gap-1.5 font-bold">
               <ShieldCheck size={14} className="text-[#0D9488]" />
-              <span>TicketLagbe Guarantee</span>
+              <span>What happens next</span>
             </div>
             <p className="text-teal-700 leading-relaxed">
-              Ticket authenticity is safeguarded by our escrow system. Payouts are locked until the buyer completes their journey.
+              {isVerified
+                ? "Your listing is live. When it sells, the buyer's payment is held in escrow and released to you after they confirm the trip."
+                : isUnderReview
+                ? "An admin will check the flagged items, usually within a few hours. You'll get a notification when it goes live."
+                : "Fix the details that failed (or upload the correct PDF) and create the listing again. Repeated failed attempts are reviewed for fraud."}
             </p>
           </div>
         </div>

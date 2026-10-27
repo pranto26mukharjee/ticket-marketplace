@@ -6,8 +6,6 @@ import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   CalendarDays,
-  MapPin,
-  Ticket,
   Armchair,
   Tag,
   ShieldCheck,
@@ -18,12 +16,9 @@ import {
   Heart,
   Flag,
   CheckCircle2,
-  Clock,
-  User,
   Star,
   Info,
   Sparkles,
-  Copy,
   Check,
   MessageSquare,
 } from "lucide-react";
@@ -41,6 +36,7 @@ interface TicketDetails {
   travelTime: string | null;
   seatNumber: string | null;
   ticketType: string | null;
+  listingDetails?: Record<string, string> | null;
   price: number | null;
   quantity: number;
   ticketStatus: string;
@@ -287,7 +283,7 @@ export default function TicketDetailsPage() {
                   {isVerified ? (
                     <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-300 bg-emerald-500/20 px-3 py-1 rounded-full border border-emerald-400/40">
                       <ShieldCheck size={14} />
-                      <span>AI Verified Genuine</span>
+                      <span>Automated checks passed</span>
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-300 bg-amber-500/20 px-3 py-1 rounded-full border border-amber-400/40">
@@ -387,6 +383,20 @@ export default function TicketDetailsPage() {
                 </div>
               </div>
 
+              {ticket.listingDetails && Object.entries(ticket.listingDetails).some(([, value]) => value) && (
+                <div className="space-y-3">
+                  <h3 className="font-bold text-slate-900 text-sm">Service / Event Details</h3>
+                  <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {Object.entries(ticket.listingDetails).filter(([, value]) => value).map(([key, value]) => (
+                      <div key={key} className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                        <dt className="text-[10px] text-slate-400 uppercase font-bold">{key.replace(/([A-Z])/g, " $1")}</dt>
+                        <dd className="text-sm font-semibold text-slate-800 mt-1">{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              )}
+
               {/* Description */}
               <div className="space-y-2">
                 <h3 className="font-bold text-slate-900 text-sm">Ticket Description & Seller Notes</h3>
@@ -395,19 +405,19 @@ export default function TicketDetailsPage() {
                 </p>
               </div>
 
-              {/* AI Verification Breakdown */}
+              {/* Automated listing checks */}
               <div className="p-5 rounded-2xl bg-teal-50/60 border border-teal-100 space-y-2">
                 <div className="flex items-center gap-2 text-teal-800 font-bold text-xs">
                   <Sparkles size={16} className="text-[#0D9488]" />
-                  <span>TicketLagbe AI Authenticity Check</span>
+                  <span>Automated listing checks</span>
                 </div>
                 <p className="text-[11px] text-teal-700">
-                  {verification?.decision || "Automated OCR scan checked ticket format, operator timestamp, and duplicate seat entries across our national database."}
+                  {verification?.decision || "Required listing details and possible duplicates are checked. This does not verify a ticket with its carrier or event organizer."}
                 </p>
                 <div className="flex items-center gap-4 text-[10px] text-teal-600 pt-1 font-semibold">
-                  <span>Confidence Score: {Math.round((verification?.aiConfidenceScore || 0.9) * 100)}%</span>
+                  <span>{verification?.aiConfidenceScore == null ? "No screening score recorded" : `Rule-based screening score: ${Math.round(verification.aiConfidenceScore * 100)}%`}</span>
                   <span>•</span>
-                  <span>Escrow Guarantee: 100% Refundable if Invalid</span>
+                  <span>Payments currently sandbox/manual</span>
                 </div>
               </div>
             </div>
@@ -436,7 +446,11 @@ export default function TicketDetailsPage() {
                     <span>4.9 / 5.0 Rating</span>
                   </span>
                   <span>•</span>
-                  <span>Joined {new Date(ticket.seller?.createdAt || Date.now()).getFullYear()}</span>
+                  {ticket.seller?.createdAt ? (
+                    <span>Joined {new Date(ticket.seller.createdAt).getFullYear()}</span>
+                  ) : (
+                    <span>Seller profile</span>
+                  )}
                 </div>
               </div>
             </div>

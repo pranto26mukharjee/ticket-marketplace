@@ -52,7 +52,7 @@ interface OrderDetail {
     seller?: {
       id: string;
       fullName: string | null;
-      email: string;
+      email: string | null;
       phone: string | null;
     } | null;
   } | null;
@@ -67,6 +67,8 @@ interface OrderDetail {
     paymentStatus: string;
     amount: number;
     gatewayReference: string | null;
+    trxId?: string | null;
+    reviewNote?: string | null;
   } | null;
   disputes?: Array<{
     id: string;
@@ -90,6 +92,7 @@ export default function OrderDetailsPage() {
   const [refundReason, setRefundReason] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [ticketDocumentUrl, setTicketDocumentUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!orderId) return;
@@ -117,6 +120,7 @@ export default function OrderDetailsPage() {
         if (isMounted && data.success) {
           setOrder(data.order);
           setUserRole(data.userRoleInOrder || "BUYER");
+          setTicketDocumentUrl(data.ticketDocumentUrl || null);
           setLastUpdated(new Date());
         }
       } catch (err: unknown) {
@@ -161,7 +165,8 @@ export default function OrderDetailsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Action failed.");
 
-      setOrder(data.order);
+      // PATCH returns only the changed order fields; keep the loaded relations
+      setOrder((prev) => (prev ? { ...prev, ...data.order, ticket: prev.ticket, buyer: prev.buyer } : prev));
       setActionMessage(data.message);
       setRefundModalOpen(false);
       setRefundReason("");
@@ -225,6 +230,9 @@ export default function OrderDetailsPage() {
   const isCompleted = order.orderStatus === "COMPLETED";
   const isCancelled = order.orderStatus === "CANCELLED";
   const isRefundRequested = order.orderStatus === "REFUND_REQUESTED";
+  const isAwaitingPayment = order.orderStatus === "PENDING";
+  const isPaymentSubmitted = order.orderStatus === "PAYMENT_SUBMITTED";
+  const isBuyer = userRole === "BUYER";
 
   return (
     <main className="min-h-screen bg-[#F8FAFC] text-slate-800 pb-20">
@@ -261,6 +269,44 @@ export default function OrderDetailsPage() {
             <CheckCircle2 size={16} className="text-emerald-600" />
             <span>{actionMessage}</span>
           </div>
+        )}
+
+        {(isAwaitingPayment || isPaymentSubmitted) && (
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 flex gap-3">
+            <Clock size={18} className="text-amber-600 shrink-0" />
+            <div>
+              <p className="font-bold">
+                {isPaymentSubmitted ? "Payment under verification" : "Awaiting payment"}
+              </p>
+              <p className="mt-0.5 text-amber-800">
+                {isPaymentSubmitted
+                  ? `We're matching TrxID ${order.payment?.trxId ?? ""} with our wallet statement. The ticket code and original PDF unlock as soon as it's confirmed.`
+                  : "This order holds your tickets for 30 minutes. If payment isn't submitted in time, the reservation is released automatically."}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {isCancelled && order.payment?.reviewNote && (
+          <div className="p-4 bg-red-50 border border-red-200 rounded-2xl text-xs text-red-800">
+            <p className="font-bold">Payment could not be verified</p>
+            <p className="mt-0.5">{order.payment.reviewNote}</p>
+          </div>
+        )}
+
+        {ticketDocumentUrl && (isBuyer ? !isAwaitingPayment && !isPaymentSubmitted : true) && (
+          <a
+            href={ticketDocumentUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="p-4 bg-white border border-slate-200 rounded-2xl text-xs flex items-center justify-between gap-3 shadow-sm hover:border-[#0D9488] transition print:hidden"
+          >
+            <span className="flex items-center gap-2 font-bold text-slate-900">
+              <Download size={16} className="text-[#0D9488]" />
+              Download original ticket (PDF)
+            </span>
+            <span className="text-slate-500">Present this at boarding / entry</span>
+          </a>
         )}
 
         {/* Digital QR Boarding Pass */}
@@ -471,7 +517,7 @@ export default function OrderDetailsPage() {
               <div className="flex justify-between text-slate-600">
                 <span>Escrow Payment Status</span>
                 <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
-                  {order.payment?.paymentStatus || "PAID"}
+                  {order.payment?.paymentStatus || "PENDING"}
                 </span>
               </div>
               <div className="flex justify-between text-base font-black text-slate-900 pt-2 border-t border-slate-200">
@@ -484,7 +530,7 @@ export default function OrderDetailsPage() {
             <div className="pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 print:hidden">
               <div className="flex items-center gap-2">
                 {/* Complete trip button */}
-                {isConfirmed && (
+                {isConfirmed && isBuyer && (
                   <button
                     onClick={() => handleOrderAction("COMPLETE")}
                     disabled={actionLoading}
@@ -495,8 +541,8 @@ export default function OrderDetailsPage() {
                   </button>
                 )}
 
-                {/* Cancel Order */}
-                {isConfirmed && (
+                {/* Cancel Order (only before payment) */}
+                {isAwaitingPayment && (
                   <button
                     onClick={() => handleOrderAction("CANCEL")}
                     disabled={actionLoading}
@@ -508,7 +554,7 @@ export default function OrderDetailsPage() {
                 )}
 
                 {/* Request Refund */}
-                {isConfirmed && (
+                {isConfirmed && isBuyer && (
                   <button
                     onClick={() => setRefundModalOpen(true)}
                     disabled={actionLoading}
@@ -591,7 +637,7 @@ export default function OrderDetailsPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={actionLoading || !refundReason.trim()}
+                  disabled={actionLoading || refundReason.trim().length < 10}
                   className="px-5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold hover:bg-amber-700 transition disabled:opacity-50"
                 >
                   {actionLoading ? "Submitting..." : "Submit Refund Claim"}

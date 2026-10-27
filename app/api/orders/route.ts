@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { releaseExpiredReservations, RESERVATION_MINUTES, TICKET_RELEASED_STATUSES } from "@/lib/orders";
+
+const MAX_TICKETS_PER_ORDER = 4;
+const SERVICE_FEE_RATE = 0.05;
 
 /*
 |--------------------------------------------------------------------------
@@ -21,6 +25,8 @@ export async function GET(request: Request) {
         { status: 401 }
       );
     }
+
+    await releaseExpiredReservations();
 
     const { searchParams } = new URL(request.url);
     const view = searchParams.get("view"); // "sales" or "purchases"
@@ -79,10 +85,18 @@ export async function GET(request: Request) {
       },
     });
 
+    // The booking code is what the buyer is paying for: release it only once
+    // payment is confirmed.
+    const visibleOrders = orders.map((order) =>
+      TICKET_RELEASED_STATUSES.includes(order.orderStatus) || !order.ticket
+        ? order
+        : { ...order, ticket: { ...order.ticket, ticketCode: null } }
+    );
+
     return NextResponse.json(
       {
         success: true,
-        orders,
+        orders: visibleOrders,
       },
       { status: 200 }
     );
@@ -144,10 +158,25 @@ export async function POST(request: Request) {
       );
     }
 
+    if (quantity > MAX_TICKETS_PER_ORDER) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: `You can buy at most ${MAX_TICKETS_PER_ORDER} tickets per order.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    await releaseExpiredReservations();
+
     const order = await prisma.$transaction(async (tx) => {
-      // 1. Fetch ticket with row lock intent
+      // 1. Fetch ticket
       const ticket = await tx.ticket.findUnique({
         where: { id: ticketId },
+        include: {
+          verifications: { take: 1, orderBy: { id: "desc" }, select: { verificationStatus: true } },
+        },
       });
 
       if (!ticket) {
@@ -159,71 +188,71 @@ export async function POST(request: Request) {
         throw new Error("OWN_TICKET");
       }
 
-      // 3. Verify availability & stock
-      if (ticket.ticketStatus !== "AVAILABLE") {
+      // 3. Only verified, available listings with a price can be bought
+      if (
+        ticket.ticketStatus !== "AVAILABLE" ||
+        ticket.verifications[0]?.verificationStatus !== "VERIFIED" ||
+        !ticket.price ||
+        // travelDate is stored as midnight of the travel day; allow the whole day
+        (ticket.travelDate && ticket.travelDate.getTime() + 24 * 60 * 60 * 1000 < Date.now())
+      ) {
         throw new Error("TICKET_UNAVAILABLE");
       }
 
-      if (ticket.quantity < quantity) {
+      // One open order per buyer per listing
+      const openOrder = await tx.order.findFirst({
+        where: {
+          buyerId: session.userId,
+          ticketId: ticket.id,
+          orderStatus: { in: ["PENDING", "PAYMENT_SUBMITTED"] },
+        },
+        select: { id: true },
+      });
+      if (openOrder) {
+        throw new Error(`OPEN_ORDER:${openOrder.id}`);
+      }
+
+      // 4. Atomically reserve stock: the WHERE clause fails if another buyer
+      // took the last tickets between our read and this write.
+      const reserved = await tx.ticket.updateMany({
+        where: { id: ticket.id, ticketStatus: "AVAILABLE", quantity: { gte: quantity } },
+        data: { quantity: { decrement: quantity } },
+      });
+
+      if (reserved.count === 0) {
         throw new Error("INSUFFICIENT_QUANTITY");
       }
 
-      // 4. Decrement inventory
-      const updatedTicket = await tx.ticket.update({
-        where: { id: ticket.id },
-        data: {
-          quantity: {
-            decrement: quantity,
-          },
-        },
-      });
+      const updatedTicket = await tx.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
 
-      // 5. Total calculation with service fee (e.g. 5% platform escrow protection fee)
-      const subtotal = (ticket.price || 0) * quantity;
-      const serviceFee = Math.round(subtotal * 0.05);
+      // 5. Total calculation with 5% platform escrow protection fee
+      const subtotal = ticket.price * quantity;
+      const serviceFee = Math.round(subtotal * SERVICE_FEE_RATE);
       const totalAmount = subtotal + serviceFee;
 
-      const isAutoConfirm = Boolean(body.autoConfirm);
-      const orderStatus = isAutoConfirm ? "CONFIRMED" : "PENDING";
-      const paymentStatus = isAutoConfirm ? "PAID" : "PENDING";
-      const gatewayReference = `TRX-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-
-      // 6. Create Order and Payment atomically
+      // 6. Create Order and Payment. Payment is confirmed later through
+      // /api/payments/verify and admin review, never by the client.
       const newOrder = await tx.order.create({
         data: {
           buyerId: session.userId,
           ticketId: ticket.id,
           quantity,
           orderTotal: totalAmount,
-          orderStatus,
+          orderStatus: "PENDING",
           paymentMethod,
           payment: {
             create: {
               paymentMethod,
               amount: totalAmount,
-              paymentStatus,
-              gatewayReference,
+              paymentStatus: "PENDING",
             },
           },
         },
         include: {
-          ticket: true,
+          ticket: { omit: { ticketCode: true } },
           payment: true,
         },
       });
-
-      // If auto-confirmed, record ledger transaction immediately
-      if (isAutoConfirm && newOrder.payment) {
-        await tx.transaction.create({
-          data: {
-            orderId: newOrder.id,
-            paymentId: newOrder.payment.id,
-            transactionType: "ESCROW_DEPOSIT",
-            amount: totalAmount,
-            transactionStatus: "SUCCESS",
-          },
-        });
-      }
 
       // 7. Mark ticket as SOLD if quantity reaches 0
       if (updatedTicket.quantity <= 0) {
@@ -241,8 +270,9 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         success: true,
-        message: "Order placed successfully.",
+        message: `Order placed. Complete payment within ${RESERVATION_MINUTES} minutes to keep your tickets.`,
         order,
+        reservationExpiresAt: new Date(order.createdAt.getTime() + RESERVATION_MINUTES * 60 * 1000),
       },
       { status: 201 }
     );
@@ -250,6 +280,17 @@ export async function POST(request: Request) {
     console.error("Create order error:", error);
 
     if (error instanceof Error) {
+      if (error.message.startsWith("OPEN_ORDER:")) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "You already have an open order for this ticket. Finish or cancel it first.",
+            orderId: error.message.split(":")[1],
+          },
+          { status: 409 }
+        );
+      }
+
       if (error.message === "TICKET_NOT_FOUND") {
         return NextResponse.json(
           {

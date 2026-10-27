@@ -2,12 +2,11 @@
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Eye, EyeOff, ShieldCheck, Loader2 } from "lucide-react";
 import { Suspense } from "react";
 
 function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   const [showPassword, setShowPassword] = useState(false);
@@ -52,9 +51,20 @@ function LoginForm() {
         return;
       }
 
-      // Redirect to original destination or dashboard
-      const redirect = searchParams.get("redirect") || "/dashboard";
-      router.push(redirect);
+      const sessionResponse = await fetch("/api/auth/me", { cache: "no-store" });
+      if (!sessionResponse.ok) {
+        setError("Login succeeded, but your session could not be verified. Please try again.");
+        return;
+      }
+
+      const requestedRedirect = searchParams.get("redirect") || "/dashboard";
+      const destination = new URL(requestedRedirect, window.location.origin);
+      const redirect =
+        destination.origin === window.location.origin
+          ? `${destination.pathname}${destination.search}${destination.hash}`
+          : "/dashboard";
+
+      window.location.replace(redirect);
     } catch (error) {
       console.error("Login error:", error);
       setError("Something went wrong. Please try again.");

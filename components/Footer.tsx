@@ -6,6 +6,7 @@ import {
   Lock,
   Mail,
   Phone,
+  KeyRound,
 } from "lucide-react";
 
 export default function Footer() {
@@ -64,11 +65,17 @@ export default function Footer() {
             </li>
 
             <li>
+              <Link href="/favorites" className="hover:text-white transition">
+                Saved Tickets
+              </Link>
+            </li>
+
+            <li>
               <Link
-                href="/dashboard"
+                href="/how-it-works"
                 className="hover:text-white transition"
               >
-                Dashboard
+                How It Works
               </Link>
             </li>
 
@@ -86,20 +93,14 @@ export default function Footer() {
           <ul className="space-y-3 text-xs text-slate-300">
 
             <li>
-              <Link
-                href="/verification-result"
-                className="hover:text-white transition"
-              >
-                Ticket Verification
+              <Link href="/notifications" className="hover:text-white transition">
+                Notifications & Inquiries
               </Link>
             </li>
 
             <li>
-              <Link
-                href="/checkout"
-                className="hover:text-white transition"
-              >
-                Secure Checkout
+              <Link href="/dashboard" className="hover:text-white transition">
+                Account Dashboard
               </Link>
             </li>
 
@@ -116,7 +117,7 @@ export default function Footer() {
 
           <div className="space-y-3 text-xs text-slate-300">
 
-            <div className="flex items-center gap-2">
+            <a href="mailto:support@ticketlagbe.com" className="flex items-center gap-2 hover:text-white transition">
               <Mail
                 size={14}
                 className="text-[#5EEAD4]"
@@ -125,18 +126,18 @@ export default function Footer() {
               <span>
                 support@ticketlagbe.com
               </span>
-            </div>
+            </a>
 
-            <div className="flex items-center gap-2">
+            <a href="tel:+8801601601706" className="flex items-center gap-2 hover:text-white transition">
               <Phone
                 size={14}
                 className="text-[#5EEAD4]"
               />
 
               <span>
-                +880 9612-XXXXXX
+                01601601706
               </span>
-            </div>
+            </a>
 
             <div className="pt-2">
 
@@ -146,6 +147,11 @@ export default function Footer() {
               </span>
 
             </div>
+
+            <Link href="/admin/login" className="inline-flex items-center gap-2 text-[#5EEAD4] hover:text-white transition">
+              <KeyRound size={14} />
+              Admin sign in
+            </Link>
 
           </div>
 

@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { paymentGateway } from "@/lib/payment/gateway";
+import { isPaymentSandbox, paymentGateway } from "@/lib/payment/gateway";
 
 /*
 |--------------------------------------------------------------------------
 | POST /api/payments/webhook
 |--------------------------------------------------------------------------
-| Handles asynchronous IPN (Instant Payment Notification) and Webhooks
-| from bKash, Nagad, SSLCommerz, and card acquirers with HMAC signature check.
+| Asynchronous payment notifications from a payment provider. Every request
+| must carry a valid HMAC-SHA256 signature of the raw body (header
+| x-payment-signature), except in PAYMENT_SANDBOX mode.
 */
 export async function POST(request: Request) {
   try {
@@ -17,17 +18,9 @@ export async function POST(request: Request) {
       request.headers.get("x-signature") ||
       "";
 
-    // 1. Cryptographic HMAC validation (Rule 18 & Phase 6 spec)
-    // If webhook secret is configured or in strict mode, verify signature
-    const isValidSignature = paymentGateway.verifyWebhookSignature(
-      rawBody,
-      signature
-    );
-
-    // In production without valid signature, reject webhook request
-    if (process.env.NODE_ENV === "production" && !isValidSignature) {
+    if (!isPaymentSandbox() && !paymentGateway.verifyWebhookSignature(rawBody, signature)) {
       return NextResponse.json(
-        { success: false, message: "Invalid webhook HMAC signature." },
+        { success: false, message: "Invalid webhook signature." },
         { status: 401 }
       );
     }
@@ -60,10 +53,7 @@ export async function POST(request: Request) {
 
     const order = await prisma.order.findUnique({
       where: { id: orderId },
-      include: {
-        payment: true,
-        ticket: true,
-      },
+      include: { payment: true },
     });
 
     if (!order) {
@@ -73,9 +63,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Event Dispatching
     if (event === "PAYMENT_COMPLETED" || payload.status === "PAID") {
-      // Idempotency: skip if already confirmed
       if (order.payment?.paymentStatus === "PAID") {
         return NextResponse.json({
           success: true,
@@ -84,27 +72,40 @@ export async function POST(request: Request) {
         });
       }
 
+      if (!["PENDING", "PAYMENT_SUBMITTED"].includes(order.orderStatus)) {
+        return NextResponse.json(
+          { success: false, message: `Order is ${order.orderStatus}; payment not applied.` },
+          { status: 409 }
+        );
+      }
+
+      // The provider must report the full amount for this order.
+      if (typeof payload.amount !== "number" || Math.abs(payload.amount - order.orderTotal) > 0.01) {
+        return NextResponse.json(
+          { success: false, message: "Webhook amount does not match the order total." },
+          { status: 400 }
+        );
+      }
+
       await prisma.$transaction(async (tx) => {
-        let paymentRecord = order.payment;
-        if (paymentRecord) {
-          paymentRecord = await tx.payment.update({
-            where: { id: paymentRecord.id },
-            data: {
-              paymentStatus: "PAID",
-              gatewayReference: gatewayReference || paymentRecord.gatewayReference,
-            },
-          });
-        } else {
-          paymentRecord = await tx.payment.create({
-            data: {
-              orderId: order.id,
-              paymentMethod: "WEBHOOK_GATEWAY",
-              amount: order.orderTotal,
-              gatewayReference: gatewayReference || `WH-${Date.now()}`,
-              paymentStatus: "PAID",
-            },
-          });
-        }
+        const paymentRecord = order.payment
+          ? await tx.payment.update({
+              where: { id: order.payment.id },
+              data: {
+                paymentStatus: "PAID",
+                gatewayReference: gatewayReference || order.payment.gatewayReference,
+                reviewedAt: new Date(),
+              },
+            })
+          : await tx.payment.create({
+              data: {
+                orderId: order.id,
+                paymentMethod: "WEBHOOK_GATEWAY",
+                amount: order.orderTotal,
+                gatewayReference: gatewayReference || `WH-${Date.now()}`,
+                paymentStatus: "PAID",
+              },
+            });
 
         await tx.order.update({
           where: { id: order.id },
@@ -120,6 +121,14 @@ export async function POST(request: Request) {
             transactionStatus: "SUCCESS",
           },
         });
+
+        await tx.notification.create({
+          data: {
+            userId: order.buyerId,
+            type: "PAYMENT_SUCCESS",
+            message: `Payment for order #${order.id.slice(-6)} confirmed. Your ticket is now available.`,
+          },
+        });
       });
 
       return NextResponse.json({
@@ -130,7 +139,7 @@ export async function POST(request: Request) {
     }
 
     if (event === "PAYMENT_FAILED" || payload.status === "FAILED") {
-      if (order.payment) {
+      if (order.payment && order.payment.paymentStatus !== "PAID") {
         await prisma.payment.update({
           where: { id: order.payment.id },
           data: { paymentStatus: "FAILED" },

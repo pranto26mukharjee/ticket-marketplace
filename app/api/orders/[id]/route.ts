@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { notifyAdmins, restockTicket, TICKET_RELEASED_STATUSES } from "@/lib/orders";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -20,10 +21,7 @@ export async function GET(
 
     if (!session) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Please login first.",
-        },
+        { success: false, message: "Please login first." },
         { status: 401 }
       );
     }
@@ -32,18 +30,13 @@ export async function GET(
 
     if (!id) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Order ID is required.",
-        },
+        { success: false, message: "Order ID is required." },
         { status: 400 }
       );
     }
 
     const order = await prisma.order.findUnique({
-      where: {
-        id,
-      },
+      where: { id },
       include: {
         ticket: {
           select: {
@@ -68,6 +61,7 @@ export async function GET(
                 phone: true,
               },
             },
+            document: { select: { id: true, fileName: true } },
           },
         },
         buyer: {
@@ -78,7 +72,9 @@ export async function GET(
             phone: true,
           },
         },
-        payment: true,
+        payment: {
+          omit: { reviewedById: true },
+        },
         disputes: {
           take: 1,
           orderBy: { id: "desc" },
@@ -88,10 +84,7 @@ export async function GET(
 
     if (!order) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Order not found.",
-        },
+        { success: false, message: "Order not found." },
         { status: 404 }
       );
     }
@@ -103,27 +96,36 @@ export async function GET(
 
     if (!isBuyer && !isSeller && !isAdmin) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "You are not authorized to view this order.",
-        },
+        { success: false, message: "You are not authorized to view this order." },
         { status: 403 }
       );
     }
 
+    const ticketReleased = TICKET_RELEASED_STATUSES.includes(order.orderStatus);
+    const canSeeTicket = isSeller || isAdmin || ticketReleased;
+
+    // Seller contact details are shared with the buyer only after payment
+    const ticket = order.ticket && {
+      ...order.ticket,
+      ticketCode: canSeeTicket ? order.ticket.ticketCode : null,
+      seller: ticketReleased || isSeller || isAdmin
+        ? order.ticket.seller
+        : { ...order.ticket.seller, email: null, phone: null },
+      document: undefined,
+    };
+
     return NextResponse.json({
       success: true,
-      order,
+      order: { ...order, ticket },
+      ticketDocumentUrl:
+        canSeeTicket && order.ticket?.document ? `/api/documents/${order.ticket.document.id}` : null,
       userRoleInOrder: isAdmin ? "ADMIN" : isSeller ? "SELLER" : "BUYER",
     });
   } catch (error) {
     console.error("Get order error:", error);
 
     return NextResponse.json(
-      {
-        success: false,
-        message: "Failed to load order.",
-      },
+      { success: false, message: "Failed to load order." },
       { status: 500 }
     );
   }
@@ -133,7 +135,11 @@ export async function GET(
 |--------------------------------------------------------------------------
 | PATCH /api/orders/[id]
 |--------------------------------------------------------------------------
-| Allows order state transitions: CANCEL, REFUND_REQUEST, COMPLETE
+| Buyer/seller order transitions:
+|   CANCEL          buyer or seller, only before payment is submitted
+|   REFUND_REQUEST  buyer, on a confirmed order (opens a dispute for admin)
+|   COMPLETE        buyer confirms the ticket worked; releases escrow to seller
+| Admins use /api/admin/orders for payment review, refunds and dispute rulings.
 */
 export async function PATCH(
   request: Request,
@@ -144,17 +150,15 @@ export async function PATCH(
 
     if (!session) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Please login first.",
-        },
+        { success: false, message: "Please login first." },
         { status: 401 }
       );
     }
 
     const { id } = await context.params;
     const body = await request.json();
-    const { action, reason } = body;
+    const { action } = body;
+    const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 1000) : "";
 
     const order = await prisma.order.findUnique({
       where: { id },
@@ -166,79 +170,66 @@ export async function PATCH(
 
     if (!order) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Order not found.",
-        },
+        { success: false, message: "Order not found." },
         { status: 404 }
       );
     }
 
     const isBuyer = order.buyerId === session.userId;
     const isSeller = order.ticket?.sellerId === session.userId;
-    const isAdmin = session.role === "ADMIN";
 
-    if (!isBuyer && !isSeller && !isAdmin) {
+    if (!isBuyer && !isSeller) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "You are not authorized to modify this order.",
-        },
+        { success: false, message: "You are not authorized to modify this order." },
         { status: 403 }
       );
     }
 
-    // 1. Action: CANCEL
-    if (action === "CANCEL") {
-      if (order.orderStatus === "CANCELLED") {
-        return NextResponse.json(
-          { success: false, message: "Order is already cancelled." },
-          { status: 400 }
-        );
-      }
+    const orderRef = `#${order.id.slice(-6)}`;
 
-      if (order.orderStatus === "COMPLETED") {
+    // 1. CANCEL: only before any money has been sent
+    if (action === "CANCEL") {
+      if (order.orderStatus !== "PENDING") {
         return NextResponse.json(
-          { success: false, message: "Completed trips cannot be cancelled." },
+          {
+            success: false,
+            message:
+              order.orderStatus === "CANCELLED"
+                ? "Order is already cancelled."
+                : "Payment has already been submitted for this order. Request a refund instead.",
+          },
           { status: 400 }
         );
       }
 
       const updated = await prisma.$transaction(async (tx) => {
-        // Restore ticket quantity
-        if (order.ticketId && order.quantity) {
-          await tx.ticket.update({
-            where: { id: order.ticketId },
-            data: {
-              quantity: {
-                increment: order.quantity,
-              },
-              ticketStatus: "AVAILABLE",
-            },
-          });
-        }
+        const claimed = await tx.order.updateMany({
+          where: { id, orderStatus: "PENDING" },
+          data: { orderStatus: "CANCELLED" },
+        });
+        if (claimed.count === 0) throw new Error("ORDER_STATE_CHANGED");
 
-        // Update payment status if exists
+        await restockTicket(tx, order);
+
         if (order.payment) {
           await tx.payment.update({
             where: { id: order.payment.id },
+            data: { paymentStatus: "CANCELLED" },
+          });
+        }
+
+        const otherParty = isBuyer ? order.ticket?.sellerId : order.buyerId;
+        if (otherParty) {
+          await tx.notification.create({
             data: {
-              paymentStatus: "REFUND_REQUESTED",
+              userId: otherParty,
+              type: "ORDER_CANCELLED",
+              message: `Order ${orderRef} was cancelled by the ${isBuyer ? "buyer" : "seller"}.`,
             },
           });
         }
 
-        // Update order status
-        return await tx.order.update({
-          where: { id },
-          data: {
-            orderStatus: "CANCELLED",
-          },
-          include: {
-            ticket: true,
-            payment: true,
-          },
-        });
+        return tx.order.findUnique({ where: { id }, include: { payment: true } });
       });
 
       return NextResponse.json({
@@ -248,102 +239,145 @@ export async function PATCH(
       });
     }
 
-    // 2. Action: REFUND_REQUEST
+    // 2. REFUND_REQUEST: buyer disputes a paid order before escrow release
     if (action === "REFUND_REQUEST") {
-      if (order.orderStatus === "REFUND_REQUESTED") {
+      if (!isBuyer) {
         return NextResponse.json(
-          { success: false, message: "A refund has already been requested for this order." },
+          { success: false, message: "Only the buyer can request a refund." },
+          { status: 403 }
+        );
+      }
+
+      if (order.orderStatus !== "CONFIRMED") {
+        return NextResponse.json(
+          {
+            success: false,
+            message:
+              order.orderStatus === "REFUND_REQUESTED"
+                ? "A refund has already been requested for this order."
+                : "Refunds can only be requested for paid orders that are not yet completed.",
+          },
+          { status: 400 }
+        );
+      }
+
+      if (reason.length < 10) {
+        return NextResponse.json(
+          { success: false, message: "Please describe the problem (at least 10 characters)." },
           { status: 400 }
         );
       }
 
       const updated = await prisma.$transaction(async (tx) => {
-        // Record dispute
         await tx.dispute.create({
           data: {
             orderId: id,
             raisedById: session.userId,
             disputeStatus: "OPEN",
-            resolutionNotes: reason?.trim() || "Buyer submitted escrow refund request.",
+            resolutionNotes: reason,
           },
         });
 
-        // Update payment status
         if (order.payment) {
           await tx.payment.update({
             where: { id: order.payment.id },
+            data: { paymentStatus: "REFUND_REQUESTED" },
+          });
+        }
+
+        if (order.ticket?.sellerId) {
+          await tx.notification.create({
             data: {
-              paymentStatus: "REFUND_REQUESTED",
+              userId: order.ticket.sellerId,
+              type: "DISPUTE_OPENED",
+              message: `The buyer of order ${orderRef} opened a dispute. Escrow is frozen until an admin reviews it.`,
             },
           });
         }
 
-        return await tx.order.update({
+        await notifyAdmins(tx, "DISPUTE_OPENED", `Dispute opened on order ${orderRef}: ${reason.slice(0, 120)}`);
+
+        return tx.order.update({
           where: { id },
-          data: {
-            orderStatus: "REFUND_REQUESTED",
-          },
-          include: {
-            ticket: true,
-            payment: true,
-            disputes: true,
-          },
+          data: { orderStatus: "REFUND_REQUESTED" },
+          include: { payment: true, disputes: true },
         });
       });
 
       return NextResponse.json({
         success: true,
-        message: "Refund request submitted. Platform escrow review is now pending.",
+        message: "Refund request submitted. Our team will review it and contact both parties.",
         order: updated,
       });
     }
 
-    // 3. Action: COMPLETE
+    // 3. COMPLETE: buyer confirms the ticket was valid; escrow goes to seller
     if (action === "COMPLETE") {
+      if (!isBuyer) {
+        return NextResponse.json(
+          { success: false, message: "Only the buyer can confirm the trip and release payment." },
+          { status: 403 }
+        );
+      }
+
+      if (order.orderStatus !== "CONFIRMED" || order.payment?.paymentStatus !== "PAID") {
+        return NextResponse.json(
+          { success: false, message: "Only paid, confirmed orders can be completed." },
+          { status: 400 }
+        );
+      }
+
       const updated = await prisma.$transaction(async (tx) => {
-        if (order.payment) {
-          await tx.payment.update({
-            where: { id: order.payment.id },
+        await tx.transaction.create({
+          data: {
+            orderId: id,
+            paymentId: order.payment!.id,
+            transactionType: "ESCROW_RELEASE",
+            amount: order.orderTotal,
+            transactionStatus: "SUCCESS",
+          },
+        });
+
+        if (order.ticket?.sellerId) {
+          await tx.notification.create({
             data: {
-              paymentStatus: "PAID",
+              userId: order.ticket.sellerId,
+              type: "PAYOUT_RELEASED",
+              message: `The buyer confirmed order ${orderRef}. Your payout has been released from escrow.`,
             },
           });
         }
 
-        return await tx.order.update({
+        return tx.order.update({
           where: { id },
-          data: {
-            orderStatus: "COMPLETED",
-          },
-          include: {
-            ticket: true,
-            payment: true,
-          },
+          data: { orderStatus: "COMPLETED" },
+          include: { payment: true },
         });
       });
 
       return NextResponse.json({
         success: true,
-        message: "Order marked as successfully completed.",
+        message: "Thanks for confirming! Payment has been released to the seller.",
         order: updated,
       });
     }
 
     return NextResponse.json(
-      {
-        success: false,
-        message: "Invalid action specified.",
-      },
+      { success: false, message: "Invalid action specified." },
       { status: 400 }
     );
   } catch (error) {
+    if (error instanceof Error && error.message === "ORDER_STATE_CHANGED") {
+      return NextResponse.json(
+        { success: false, message: "This order changed while you were viewing it. Please refresh." },
+        { status: 409 }
+      );
+    }
+
     console.error("Modify order error:", error);
 
     return NextResponse.json(
-      {
-        success: false,
-        message: "Failed to process order action.",
-      },
+      { success: false, message: "Failed to process order action." },
       { status: 500 }
     );
   }

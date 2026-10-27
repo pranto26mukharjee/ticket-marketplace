@@ -123,6 +123,23 @@ export async function PATCH(request: Request) {
     const body = await request.json();
     const { userId, action, accountStatus, role, identityVerified } = body;
 
+    const normalizedRole = typeof role === "string" ? role.trim().toUpperCase() : "";
+    const normalizedStatus = typeof accountStatus === "string" ? accountStatus.trim().toUpperCase() : "";
+
+    if (action === "UPDATE_ROLE" && !["BUYER", "SELLER", "ADMIN"].includes(normalizedRole)) {
+      return NextResponse.json(
+        { success: false, message: "Choose a valid account role." },
+        { status: 400 }
+      );
+    }
+
+    if (action === "UPDATE_STATUS" && !["ACTIVE", "SUSPENDED", "BANNED"].includes(normalizedStatus)) {
+      return NextResponse.json(
+        { success: false, message: "Choose a valid account status." },
+        { status: 400 }
+      );
+    }
+
     if (!userId) {
       return NextResponse.json(
         { success: false, message: "User ID is required." },
@@ -143,7 +160,10 @@ export async function PATCH(request: Request) {
     }
 
     // Prevent admin from banning or demoting self
-    if (user.id === session.userId && (accountStatus === "BANNED" || accountStatus === "SUSPENDED" || role === "BUYER")) {
+    if (
+      user.id === session.userId &&
+      ((action === "UPDATE_STATUS" && normalizedStatus !== "ACTIVE") || action === "UPDATE_ROLE")
+    ) {
       return NextResponse.json(
         { success: false, message: "You cannot suspend, ban, or demote your own administrator account." },
         { status: 400 }
@@ -152,11 +172,11 @@ export async function PATCH(request: Request) {
 
     const updatedUser = await prisma.$transaction(async (tx) => {
       // 1. Status modification
-      if (action === "UPDATE_STATUS" && accountStatus) {
+      if (action === "UPDATE_STATUS") {
         await tx.adminAction.create({
           data: {
             adminId: session.userId,
-            actionType: `SET_STATUS_${accountStatus.toUpperCase()}`,
+            actionType: `SET_STATUS_${normalizedStatus}`,
             targetType: "USER",
             targetId: userId,
           },
@@ -164,17 +184,17 @@ export async function PATCH(request: Request) {
 
         return await tx.user.update({
           where: { id: userId },
-          data: { accountStatus: accountStatus.toUpperCase() },
+          data: { accountStatus: normalizedStatus },
           include: { profile: true },
         });
       }
 
       // 2. Role modification
-      if (action === "UPDATE_ROLE" && role) {
+      if (action === "UPDATE_ROLE") {
         await tx.adminAction.create({
           data: {
             adminId: session.userId,
-            actionType: `SET_ROLE_${role.toUpperCase()}`,
+            actionType: `SET_ROLE_${normalizedRole}`,
             targetType: "USER",
             targetId: userId,
           },
@@ -182,7 +202,7 @@ export async function PATCH(request: Request) {
 
         return await tx.user.update({
           where: { id: userId },
-          data: { role: role.toUpperCase() },
+          data: { role: normalizedRole },
           include: { profile: true },
         });
       }
