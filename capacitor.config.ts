@@ -1,4 +1,4 @@
-import type { CapacitorConfig } from "@capacitor/cli";
+﻿import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
   appId: "com.ticketlagbe.app",
@@ -8,7 +8,7 @@ const config: CapacitorConfig = {
   server: {
     url:
       process.env.CAPACITOR_SERVER_URL ||
-      "https://ticketlagbe-marketplace-psi.vercel.app",
+      "https://ticketlagbe-marketplace.vercel.app",
     cleartext: false,
     errorPath: "offline.html",
   },
