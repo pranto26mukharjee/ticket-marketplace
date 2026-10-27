@@ -2,15 +2,28 @@
 
 Bangladesh's premier peer-to-peer secondary ticketing platform engineered for secure travel and event ticket exchange. TicketLagbe solves ticket scalping, counterfeit tickets, and payment fraud through **AI-assisted ticket verification**, **cryptographic duplicate detection (SHA-256)**, and an **automated 4-stage neutral escrow system**.
 
+## 🌐 Live
+
+| | |
+| :--- | :--- |
+| **Website** | https://ticketlagbe-marketplace.vercel.app |
+| **Android app (APK)** | https://ticketlagbe-marketplace.vercel.app/downloads/TicketLagbe.apk |
+| **Admin panel** | https://ticketlagbe-marketplace.vercel.app/admin/login |
+| **Support** | support@ticketlagbe.com · 01601601706 |
+
+The Android app is a Capacitor shell that loads the live website, so website updates reach the app without reinstalling.
+
 ---
 
 ## 🚀 Key Highlights & Architecture
 
 - **Next.js 16 (App Router + Turbopack)**: Blazing fast SSR/SSG rendering with server-actions and dynamic routing.
 - **PostgreSQL & Prisma ORM**: Strongly-typed schema adhering to the master ER diagram with 19 relational entities.
-- **Centralized JWT Authentication**: Double-layered protection via HttpOnly cookie and Bearer header, unified through `lib/auth.ts` and `middleware.ts`.
-- **AI-Powered OCR & Hash Engine**: Auto-extracts ticket code, travel dates, origin, destination, and checks duplicate SHA-256 hashes before approval.
-- **Multi-Rail Payment Gateway Sandbox**: bKash, Nagad, Rocket, and Debit/Credit Card checkout simulation with HMAC-SHA256 signature verification and automated refund dispatch.
+- **Centralized JWT Authentication**: HttpOnly cookie or Bearer header, verified in `lib/auth.ts` and `proxy.ts`; role and ban status are re-read from the database on every request.
+- **AI Ticket Verification (Claude)**: Claude reads the uploaded ticket PDF and extracts route, date, seat, PNR, operator and fare; code then cross-checks them against the listing, plus duplicate-PDF (SHA-256), duplicate seat/PNR and seller-trust checks. Clean passes go live, anything flagged goes to the admin review queue.
+- **Private Ticket Documents**: Original PDFs are stored in the database and released only to the seller, admins, and the buyer of a paid order.
+- **Payments**: bKash/Nagad/Rocket TrxID submissions are verified by an admin against the merchant wallet (one TrxID per order); sandbox card flow behind `PAYMENT_SANDBOX`; HMAC-SHA256 signed webhooks.
+- **Database Explorer (`/admin/database`)**: Read-only table browser with search and audited CSV export; password hashes and PDF bytes are never exposed.
 - **4-Stage Neutral Escrow Engine**: `PENDING` ➔ `ESCROW_HOLD` ➔ `CONFIRMED` ➔ `RELEASED` / `REFUNDED` with buyer delivery confirmation and dispute windows.
 - **Admin Command Center (`/admin`)**: Real-time platform metrics, user moderation (Activate/Suspend/Ban), AI verification overrides, dispute resolution, and security fraud alerts.
 - **Security & Threat Protection**: In-memory sliding-window rate limiting, automated anomaly detection, immutable audit logs, and strict HTTP security headers (CSP, HSTS, X-Frame-Options).
@@ -71,18 +84,14 @@ Bangladesh's premier peer-to-peer secondary ticketing platform engineered for se
 
 ## ⚙️ Environment Variables Setup
 
-Create a `.env` file in the project root:
+Copy `.env.example` to `.env` and fill it in. The important ones:
 
 ```env
-# Database
-DATABASE_URL="postgresql://user:password@localhost:5432/ticketlagbe?schema=public"
-
-# Authentication & Security
-JWT_SECRET="your-super-secret-jwt-signing-key-min-32-chars"
-NEXT_PUBLIC_APP_URL="http://localhost:3000"
-
-# Optional Payment Webhook Secret
-PAYMENT_WEBHOOK_SECRET="your-hmac-webhook-secret-key"
+DATABASE_URL="postgresql://user:password@localhost:5432/ticketlagbe"
+JWT_SECRET=""            # 32+ random chars; the app refuses to start without it
+ANTHROPIC_API_KEY=""     # Claude key for AI ticket verification; without it listings go to manual review
+PAYMENT_SECRET_KEY=""    # HMAC secret for /api/payments/webhook
+PAYMENT_SANDBOX="false"  # "true" only for demos: enables simulated card payments
 ```
 
 ---
@@ -97,19 +106,27 @@ npm install
 ### 2. Generate Prisma Client & Run Migrations
 ```bash
 npx prisma generate
-npx prisma db push
+npx prisma migrate deploy
 ```
 
-### 3. Start Development Server
+### 3. Create an Admin Account
+```bash
+node --env-file=.env scripts/create-admin.mjs admin@example.com "Admin" "AStrongPassword123"
+```
+
+### 4. Start Development Server
 ```bash
 npm run dev
 ```
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-### 4. Build for Production
+### 5. Deploy to Vercel
 ```bash
-npm run build
-npm run start
+npx vercel deploy --prod
+```
+`vercel-build` runs `prisma generate`, `prisma migrate deploy` and `next build`. To create the first admin on production, pass it once at build time:
+```bash
+npx vercel deploy --prod --build-env ADMIN_BOOTSTRAP_EMAIL=admin@example.com --build-env "ADMIN_BOOTSTRAP_PASSWORD=AStrongPassword123"
 ```
 
 ---
@@ -133,7 +150,7 @@ npm run android:sync
 npm run android:open
 ```
 
-By default, the app opens `https://ticketlagbe.com`. To build against another HTTPS deployment, set `CAPACITOR_SERVER_URL` before syncing:
+By default, the app opens `https://ticketlagbe-marketplace.vercel.app`. To build against another HTTPS deployment, set `CAPACITOR_SERVER_URL` before syncing:
 
 ```powershell
 $env:CAPACITOR_SERVER_URL = "https://your-deployment.example"
